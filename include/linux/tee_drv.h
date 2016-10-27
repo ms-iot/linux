@@ -218,6 +218,50 @@ void *tee_get_drvdata(struct tee_device *teedev);
 struct tee_shm *tee_shm_alloc(struct tee_context *ctx, size_t size, u32 flags);
 
 /**
+ * tee_shm_priv_alloc() - Allocate shared memory privately
+ * @dev:	Device that allocates the shared memory
+ * @size:	Requested size of shared memory
+ *
+ * Allocates shared memory buffer that is not associated with any client
+ * context. Such buffers are owned by TEE driver and used for internal calls.
+ *
+ * @returns a pointer to 'struct tee_shm'
+ */
+struct tee_shm *tee_shm_priv_alloc(struct tee_device *teedev, size_t size);
+
+/**
+ * tee_shm_register() - Register shared memory buffer
+ * @ctx:	Context that registers the shared memory
+ * @addr:	Address is userspace of the shared buffer
+ * @length:	Length of the shared buffer
+ * @flags:	Flags setting properties for the requested shared memory.
+ *
+ * @returns a pointer to 'struct tee_shm'
+ */
+struct tee_shm *tee_shm_register(struct tee_context *ctx, unsigned long addr,
+				 size_t length, u32 flags);
+
+/**
+ * tee_shm_register_fd() - Register shared memory from file descriptor
+ *
+ * @ctx:	Context that allocates the shared memory
+ * @fd:		shared memory file descriptor reference.
+ *
+ * @returns a pointer to 'struct tee_shm'
+ */
+struct tee_shm *tee_shm_register_fd(struct tee_context *ctx, int fd);
+
+/**
+ * tee_shm_is_registered() - Check if shared memory object in registered in TEE
+ * @shm:	Shared memory handle
+ * @returns true if object is registered in TEE
+ */
+static inline bool tee_shm_is_registered(struct tee_shm *shm)
+{
+	return shm && (shm->flags & TEE_SHM_REGISTER);
+}
+
+/**
  * tee_shm_free() - Free shared memory
  * @shm:	Handle to shared memory to free
  */
