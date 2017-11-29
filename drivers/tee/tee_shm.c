@@ -31,7 +31,6 @@ struct tee_shm_dmabuf_ref {
 static void tee_shm_release(struct tee_shm *shm)
 {
 	struct tee_device *teedev = shm->teedev;
-	struct tee_shm_pool_mgr *poolm;
 
 	mutex_lock(&teedev->mutex);
 	idr_remove(&teedev->idr, shm->id);
@@ -111,6 +110,10 @@ static int tee_shm_op_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
 	struct tee_shm *shm = dmabuf->priv;
 	size_t size = vma->vm_end - vma->vm_start;
 
+	/* Refuse sharing shared memory provided by application */
+	if (shm->flags & TEE_SHM_REGISTER)
+		return -EINVAL;
+
 	return remap_pfn_range(vma, vma->vm_start, shm->paddr >> PAGE_SHIFT,
 			       size, vma->vm_page_prot);
 }
@@ -124,25 +127,19 @@ static const struct dma_buf_ops tee_shm_dma_buf_ops = {
 	.mmap = tee_shm_op_mmap,
 };
 
-/**
- * tee_shm_alloc() - Allocate shared memory
- * @ctx:	Context that allocates the shared memory
- * @size:	Requested size of shared memory
- * @flags:	Flags setting properties for the requested shared memory.
- *
- * Memory allocated as global shared memory is automatically freed when the
- * TEE file pointer is closed. The @flags field uses the bits defined by
- * TEE_SHM_* in <linux/tee_drv.h>. TEE_SHM_MAPPED must currently always be
- * set. If TEE_SHM_DMA_BUF global shared memory will be allocated and
- * associated with a dma-buf handle, else driver private memory.
- */
-struct tee_shm *tee_shm_alloc(struct tee_context *ctx, size_t size, u32 flags)
+struct tee_shm *__tee_shm_alloc(struct tee_context *ctx,
+				struct tee_device *teedev,
+				size_t size, u32 flags)
 {
-	struct tee_device *teedev = ctx->teedev;
 	struct tee_shm_pool_mgr *poolm = NULL;
 	struct tee_shm *shm;
 	void *ret;
 	int rc;
+
+	if (ctx && ctx->teedev != teedev) {
+		dev_err(teedev->dev.parent, "ctx and teedev mismatch\n");
+		return ERR_PTR(-EINVAL);
+	}
 
 	if (!(flags & TEE_SHM_MAPPED)) {
 		dev_err(teedev->dev.parent,
@@ -170,7 +167,7 @@ struct tee_shm *tee_shm_alloc(struct tee_context *ctx, size_t size, u32 flags)
 		goto err_dev_put;
 	}
 
-	shm->flags = flags;
+	shm->flags = flags | TEE_SHM_POOL;
 	shm->teedev = teedev;
 	shm->ctx = ctx;
 	if (flags & TEE_SHM_DMA_BUF)
@@ -226,6 +223,23 @@ err_kfree:
 err_dev_put:
 	tee_device_put(teedev);
 	return ret;
+}
+
+/**
+ * tee_shm_alloc() - Allocate shared memory
+ * @ctx:	Context that allocates the shared memory
+ * @size:	Requested size of shared memory
+ * @flags:	Flags setting properties for the requested shared memory.
+ *
+ * Memory allocated as global shared memory is automatically freed when the
+ * TEE file pointer is closed. The @flags field uses the bits defined by
+ * TEE_SHM_* in <linux/tee_drv.h>. TEE_SHM_MAPPED must currently always be
+ * set. If TEE_SHM_DMA_BUF global shared memory will be allocated and
+ * associated with a dma-buf handle, else driver private memory.
+ */
+struct tee_shm *tee_shm_alloc(struct tee_context *ctx, size_t size, u32 flags)
+{
+	return __tee_shm_alloc(ctx, ctx->teedev, size, flags);
 }
 EXPORT_SYMBOL_GPL(tee_shm_alloc);
 
@@ -448,10 +462,9 @@ EXPORT_SYMBOL_GPL(tee_shm_register_fd);
  */
 int tee_shm_get_fd(struct tee_shm *shm)
 {
-	u32 req_flags = TEE_SHM_MAPPED | TEE_SHM_DMA_BUF;
 	int fd;
 
-	if ((shm->flags & req_flags) != req_flags)
+	if (!(shm->flags & TEE_SHM_DMA_BUF))
 		return -EINVAL;
 
 	get_dma_buf(shm->dmabuf);
@@ -490,6 +503,8 @@ EXPORT_SYMBOL_GPL(tee_shm_free);
  */
 int tee_shm_va2pa(struct tee_shm *shm, void *va, phys_addr_t *pa)
 {
+	if (!(shm->flags & TEE_SHM_MAPPED))
+		return -EINVAL;
 	/* Check that we're in the range of the shm */
 	if ((char *)va < (char *)shm->kaddr)
 		return -EINVAL;
@@ -510,6 +525,8 @@ EXPORT_SYMBOL_GPL(tee_shm_va2pa);
  */
 int tee_shm_pa2va(struct tee_shm *shm, phys_addr_t pa, void **va)
 {
+	if (!(shm->flags & TEE_SHM_MAPPED))
+		return -EINVAL;
 	/* Check that we're in the range of the shm */
 	if (pa < shm->paddr)
 		return -EINVAL;
@@ -536,6 +553,8 @@ EXPORT_SYMBOL_GPL(tee_shm_pa2va);
  */
 void *tee_shm_get_va(struct tee_shm *shm, size_t offs)
 {
+	if (!(shm->flags & TEE_SHM_MAPPED))
+		return ERR_PTR(-EINVAL);
 	if (offs >= shm->size)
 		return ERR_PTR(-EINVAL);
 	return (char *)shm->kaddr + offs;
