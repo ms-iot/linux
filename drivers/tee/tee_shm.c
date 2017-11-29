@@ -171,9 +171,9 @@ struct tee_shm *__tee_shm_alloc(struct tee_context *ctx,
 	shm->teedev = teedev;
 	shm->ctx = ctx;
 	if (flags & TEE_SHM_DMA_BUF)
-		poolm = &teedev->pool->dma_buf_mgr;
+		poolm = teedev->pool->dma_buf_mgr;
 	else
-		poolm = &teedev->pool->private_mgr;
+		poolm = teedev->pool->private_mgr;
 
 	rc = poolm->ops->alloc(poolm, shm, size);
 	if (rc) {
