@@ -1,0 +1,103 @@
+/*
+ * Device Tree file for Scalys Grape Board.
+ * 
+ * Copyright 2017 Scalys B.V.
+ *
+ * Copyright 2016 Freescale Semiconductor, Inc.
+ *     
+ *     This library is free software; you can redistribute it and/or
+ *     modify it under the terms of the GNU General Public License as
+ *     published by the Free Software Foundation; either version 2 of the
+ *     License, or (at your option) any later version.
+ *
+ *     This library is distributed in the hope that it will be useful,
+ *     but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *     GNU General Public License for more details.
+ */
+/dts-v1/;
+
+#include "fsl-ls1012a.dtsi"
+
+/ {
+	model = "GrapeBoard";
+	compatible = "fsl,ls1012a";
+
+	aliases {
+		ethernet0 = &pfe_mac0;
+		ethernet1 = &pfe_mac1;
+	};
+};
+
+&duart0 {
+	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+};
+
+&qspi {
+	num-cs = <2>;
+	bus-num = <0>;
+	status = "okay";
+
+	qflash0: s25fs512s@0 {
+		compatible = "spansion,m25p80";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		spi-max-frequency = <20000000>;
+		m25p,fast-read;
+		reg = <0>;
+	};
+};
+
+&sata {
+	status = "okay";
+};
+
+&esdhc0 {
+	sd-uhs-sdr104;
+	sd-uhs-sdr50;
+	sd-uhs-sdr25;
+	sd-uhs-sdr12;
+	status = "okay";
+};
+
+&pfe {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	ethernet@0 {
+		compatible = "fsl,pfe-gemac-port";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x0>;	/* GEM_ID */
+		fsl,gemac-bus-id = <0x0>;	/* BUS_ID */
+		fsl,gemac-phy-id = <0x0>;	/* PHY_ID */
+		fsl,mdio-mux-val = <0x0>;
+		phy-mode = "sgmii";
+		fsl,pfe-phy-if-flags = <0x0>;
+
+		mdio@0 {
+			reg = <0x1>; /* enabled/disabled */
+		};
+	};
+
+	ethernet@1 {
+		compatible = "fsl,pfe-gemac-port";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x1>;	/* GEM_ID */
+		fsl,gemac-bus-id = <0x1>;	/* BUS_ID */
+		fsl,gemac-phy-id = <0x2>;	/* PHY_ID */
+		fsl,mdio-mux-val = <0x0>;
+		phy-mode = "sgmii";
+		fsl,pfe-phy-if-flags = <0x0>;
+
+		mdio@0 {
+			reg = <0x0>; /* enabled/disabled */
+		};
+	};
+};
