@@ -1202,7 +1202,7 @@ static void ls1012a_configure_serdes(struct net_device *ndev)
 		pfe_eth_mdio_write(bus, 0, 0x0, value);
 	} else {
 		pfe_eth_mdio_write(bus, 0, 0x14, 0xb);
-		pfe_eth_mdio_write(bus, 0, 0x4, 0x1a1);
+		pfe_eth_mdio_write(bus, 0, 0x4, 0x4001); /* Autonegotiation is incorrect with value 0x1a1 */
 		pfe_eth_mdio_write(bus, 0, 0x12, 0x400);
 		pfe_eth_mdio_write(bus, 0, 0x13, 0x0);
 		pfe_eth_mdio_write(bus, 0, 0x0, 0x1140);
@@ -1220,6 +1220,8 @@ static int pfe_phy_init(struct net_device *ndev)
 	char phy_id[MII_BUS_ID_SIZE + 3];
 	char bus_id[MII_BUS_ID_SIZE];
 	phy_interface_t interface;
+	
+	struct mii_bus *bus = pfe->eth.eth_priv[0]->mii_bus;
 
 	priv->oldlink = 0;
 	priv->oldspeed = 0;
@@ -1245,6 +1247,15 @@ static int pfe_phy_init(struct net_device *ndev)
 		/*Config MDIO from PAD */
 		regmap_write(pfe->scfg, 0x484, 0x80000000);
 	}
+	
+	/* 
+	 * Reset external PHY on MDIO bus with address 0 to undo
+	 * changes from the unintended external writes during the 
+	 * previous SERDES configuration. (Temporary fix)
+	 */
+	pfe_eth_mdio_write(bus, 0, 0x1F, 0x8000);
+	msleep(10);
+ 	pfe_eth_mdio_write(bus, 0, 0x18, 0x61B6);
 
 	priv->oldlink = 0;
 	priv->oldspeed = 0;
