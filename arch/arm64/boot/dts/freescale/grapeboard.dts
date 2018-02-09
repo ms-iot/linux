@@ -1,7 +1,7 @@
 /*
  * Device Tree file for Scalys Grape Board.
  * 
- * Copyright 2017 Scalys B.V.
+ * Copyright 2018 Scalys B.V.
  *
  * Copyright 2016 Freescale Semiconductor, Inc.
  *     
@@ -26,6 +26,7 @@
 	aliases {
 		ethernet0 = &pfe_mac0;
 		ethernet1 = &pfe_mac1;
+		serial0 = &duart0;
 	};
 };
 
