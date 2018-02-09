@@ -1220,8 +1220,6 @@ static int pfe_phy_init(struct net_device *ndev)
 	char phy_id[MII_BUS_ID_SIZE + 3];
 	char bus_id[MII_BUS_ID_SIZE];
 	phy_interface_t interface;
-	
-	struct mii_bus *bus = pfe->eth.eth_priv[0]->mii_bus;
 
 	priv->oldlink = 0;
 	priv->oldspeed = 0;
@@ -1247,15 +1245,6 @@ static int pfe_phy_init(struct net_device *ndev)
 		/*Config MDIO from PAD */
 		regmap_write(pfe->scfg, 0x484, 0x80000000);
 	}
-	
-	/* 
-	 * Reset external PHY on MDIO bus with address 0 to undo
-	 * changes from the unintended external writes during the 
-	 * previous SERDES configuration. (Temporary fix)
-	 */
-	pfe_eth_mdio_write(bus, 0, 0x1F, 0x8000);
-	msleep(10);
- 	pfe_eth_mdio_write(bus, 0, 0x18, 0x61B6);
 
 	priv->oldlink = 0;
 	priv->oldspeed = 0;

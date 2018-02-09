@@ -76,7 +76,7 @@
 		#size-cells = <0>;
 		reg = <0x0>;	/* GEM_ID */
 		fsl,gemac-bus-id = <0x0>;	/* BUS_ID */
-		fsl,gemac-phy-id = <0x0>;	/* PHY_ID */
+		fsl,gemac-phy-id = <0x1>;	/* PHY_ID */
 		fsl,mdio-mux-val = <0x0>;
 		phy-mode = "sgmii";
 		fsl,pfe-phy-if-flags = <0x0>;
