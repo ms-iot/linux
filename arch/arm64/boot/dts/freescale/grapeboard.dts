@@ -18,6 +18,7 @@
 /dts-v1/;
 
 #include "fsl-ls1012a.dtsi"
+#include "include/dt-bindings/gpio/gpio.h"
 
 / {
 	model = "GrapeBoard";
@@ -38,6 +39,11 @@
 	status = "okay";
 };
 
+&dspi {
+        bus-num = <0>;
+        status = "okay";
+};
+
 &qspi {
 	num-cs = <2>;
 	bus-num = <0>;
@@ -53,6 +59,7 @@
 	};
 };
 
+
 &sata {
 	status = "okay";
 };
@@ -63,6 +70,64 @@
 	sd-uhs-sdr25;
 	sd-uhs-sdr12;
 	status = "okay";
+};
+
+&gpio0 {
+        ngpios = <32>;
+        gpio-line-names =   "RPI_GPIO_3", 
+                            "RPI_GPIO_4", 
+                            "RPI_GPIO_2", 
+                            "RPI_GPIO_1", 
+                            "reserved", 
+                            "reserved", 
+                            "reserved", 
+                            "reserved",
+                            "reserved", 
+                            "reserved", 
+                            "reserved", 
+                            "reserved", 
+                            "reserved", 
+                            "reserved", 
+                            "reserved", 
+                            "reserved",
+                            "reserved", 
+                            "reserved", 
+                            "reserved", 
+                            "reserved", 
+                            "reserved", 
+                            "reserved", 
+                            "CPU_IRQ", 
+                            "reserved",
+                            "RPI_GPIO_11", 
+                            "RPI_GPIO_15", 
+                            "RPI_GPIO_16", 
+                            "RPI_GPIO_5", 
+                            "RPI_GPIO_12", 
+                            "RPI_GPIO_14", 
+                            "reserved", 
+                            "reserved";
+};
+
+&gpio1 {
+        ngpios = <18>;
+        gpio-line-names =   "M2_GPIO_4", 
+                            "M2_GPIO_5", 
+                            "M2_GPIO_6", 
+                            "QPSI_A_MUX_SEL", 
+                            "RPI_GPIO_6", 
+                            "RPI_GPIO_7", 
+                            "RPI_GPIO_8", 
+                            "RPI_GPIO_9",
+                            "reserved", 
+                            "RPI_GPIO_10", 
+                            "RPI_GPIO_13", 
+                            "M2_CFG_1", 
+                            "M2_CFG_0", 
+                            "M2_CFG_2", 
+                            "M2_CFG_3", 
+                            "reserved",
+                            "reserved", 
+                            "TMP_DETECT_N";
 };
 
 &pfe {

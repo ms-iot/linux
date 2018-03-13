@@ -395,6 +395,19 @@
 			interrupt-controller;
 			#interrupt-cells = <2>;
 		};
+                
+                dspi: dspi@2100000 {
+                    compatible = "fsl,ls1012a-dspi", "fsl,ls1021a-v1.0-dspi";
+                    #address-cells = <1>;
+                    #size-cells = <0>;
+                    reg = <0x0 0x2100000 0x0 0x10000>;
+                    interrupts = <0 64 IRQ_TYPE_LEVEL_HIGH>;
+                    clock-names = "dspi";
+                    clocks = <&clockgen 4 0>;
+                    spi-num-chipselects = <3>;
+                    big-endian;
+                    status = "disabled";
+                };
 
 		wdog0: wdog@2ad0000 {
 			compatible = "fsl,ls1012a-wdt",
