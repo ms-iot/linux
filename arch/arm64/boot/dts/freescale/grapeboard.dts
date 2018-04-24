@@ -74,10 +74,10 @@
 
 &gpio0 {
         ngpios = <32>;
-        gpio-line-names =   "RPI_GPIO_3", 
-                            "RPI_GPIO_4", 
-                            "RPI_GPIO_2", 
-                            "RPI_GPIO_1", 
+        gpio-line-names =   "RPI_GPIO1_00", /* UART_TXD */
+                            "RPI_GPIO1_01", /* UART_RXD */
+                            "RPI_GPIO1_02", /* I2C_SCL */
+                            "RPI_GPIO1_03", /* I2C_SDA */
                             "reserved", 
                             "reserved", 
                             "reserved", 
@@ -98,29 +98,29 @@
                             "reserved", 
                             "CPU_IRQ", 
                             "reserved",
-                            "RPI_GPIO_11", 
-                            "RPI_GPIO_15", 
-                            "RPI_GPIO_16", 
-                            "RPI_GPIO_5", 
-                            "RPI_GPIO_12", 
-                            "RPI_GPIO_14", 
+                            "RPI_GPIO1_24", /* SPI_MOSI */ 
+                            "RPI_GPIO1_25", /* N_SPI_CE0 */
+                            "RPI_GPIO1_26", /* N_SPI_CE1 */
+                            "RPI_GPIO1_27", /* N_SPI_CE2 */
+                            "RPI_GPIO1_28", /* SPI_MISO */
+                            "RPI_GPIO1_29", /* SPI_CLK */
                             "reserved", 
                             "reserved";
 };
 
 &gpio1 {
         ngpios = <18>;
-        gpio-line-names =   "M2_GPIO_4", 
-                            "M2_GPIO_5", 
-                            "M2_GPIO_6", 
+        gpio-line-names =   "M2_GPIO2_00", 
+                            "M2_GPIO2_01", 
+                            "M2_GPIO2_02", 
                             "QPSI_A_MUX_SEL", 
-                            "RPI_GPIO_6", 
-                            "RPI_GPIO_7", 
-                            "RPI_GPIO_8", 
-                            "RPI_GPIO_9",
+                            "RPI_GPIO2_04", 
+                            "RPI_GPIO2_05", 
+                            "RPI_GPIO2_06", 
+                            "RPI_GPIO2_07",
                             "reserved", 
-                            "RPI_GPIO_10", 
-                            "RPI_GPIO_13", 
+                            "RPI_GPIO2_09", 
+                            "RPI_GPIO2_10", 
                             "M2_CFG_1", 
                             "M2_CFG_0", 
                             "M2_CFG_2", 
