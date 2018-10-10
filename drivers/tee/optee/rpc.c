@@ -176,6 +176,7 @@ out:
 	kfree(params);
 }
 
+
 static struct tee_shm *cmd_alloc_suppl(struct tee_context *ctx, size_t sz)
 {
 	u32 ret;
@@ -199,12 +200,37 @@ static struct tee_shm *cmd_alloc_suppl(struct tee_context *ctx, size_t sz)
 	return shm;
 }
 
+static struct tee_shm *cmd_alloc_host(struct tee_context *ctx, size_t sz, struct optee_session *session, uint64_t key)
+{
+	u32 ret;
+	struct tee_param param;
+	struct optee *optee = tee_get_drvdata(ctx->teedev);
+	struct tee_shm *shm;
+
+	param.attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INOUT;
+	param.u.value.a = OPTEE_MSG_RPC_SHM_TYPE_HOST;
+	param.u.value.b = sz;
+	param.u.value.c = 0;
+
+	ret = optee_grpc_req(session, key, OPTEE_MSG_RPC_CMD_SHM_ALLOC, 1, &param);
+	if (ret)
+		return ERR_PTR(-ENOMEM);
+
+	mutex_lock(&optee->supp.mutex);
+	/* Increases count as secure world doesn't have a reference */
+	shm = tee_shm_get_from_id(ctx, param.u.value.c);
+	mutex_unlock(&optee->supp.mutex);
+	return shm;
+}
+
 static void handle_rpc_func_cmd_shm_alloc(struct tee_context *ctx,
 					  struct optee_msg_arg *arg,
 					  struct optee_call_ctx *call_ctx)
 {
 	phys_addr_t pa;
 	struct tee_shm *shm;
+	struct optee_context_data *ctxdata = ctx->data;
+	struct optee_session *sess;
 	size_t sz;
 	size_t n;
 
@@ -216,17 +242,49 @@ static void handle_rpc_func_cmd_shm_alloc(struct tee_context *ctx,
 		return;
 	}
 
-	for (n = 1; n < arg->num_params; n++) {
-		if (arg->params[n].attr != OPTEE_MSG_ATTR_TYPE_NONE) {
+	switch (arg->params[0].u.value.a) {
+	case OPTEE_MSG_RPC_SHM_TYPE_APPL:
+	case OPTEE_MSG_RPC_SHM_TYPE_KERNEL:
+		for (n = 1; n < arg->num_params; n++) {
+			if (arg->params[n].attr != OPTEE_MSG_ATTR_TYPE_NONE) {
+				arg->ret = TEEC_ERROR_BAD_PARAMETERS;
+				return;
+			}
+		}
+		break;
+	case OPTEE_MSG_RPC_SHM_TYPE_HOST:
+		if(arg->params[1].attr != OPTEE_MSG_ATTR_TYPE_VALUE_INPUT) {
 			arg->ret = TEEC_ERROR_BAD_PARAMETERS;
 			return;
 		}
+
+		for (n = 2; n < arg->num_params; n++) {
+			if (arg->params[n].attr != OPTEE_MSG_ATTR_TYPE_NONE) {
+				arg->ret = TEEC_ERROR_BAD_PARAMETERS;
+				return;
+			}
+		}
+		break;
+	default:
+		arg->ret = TEEC_ERROR_BAD_PARAMETERS;
+		return;
 	}
 
 	sz = arg->params[0].u.value.b;
 	switch (arg->params[0].u.value.a) {
 	case OPTEE_MSG_RPC_SHM_TYPE_APPL:
 		shm = cmd_alloc_suppl(ctx, sz);
+		break;
+	case OPTEE_MSG_RPC_SHM_TYPE_HOST:
+		mutex_lock(&ctxdata->mutex);
+		sess = optee_find_session(ctxdata, (u32)arg->params[1].u.value.a);
+		mutex_unlock(&ctxdata->mutex);
+		if (!sess) {
+			arg->ret = TEEC_ERROR_BAD_PARAMETERS;
+			return;
+		}
+
+		shm = cmd_alloc_host(ctx, sz, sess, arg->params[1].u.value.b);
 		break;
 	case OPTEE_MSG_RPC_SHM_TYPE_KERNEL:
 		shm = tee_shm_alloc(ctx, sz, TEE_SHM_MAPPED);
@@ -320,15 +378,60 @@ static void cmd_free_suppl(struct tee_context *ctx, struct tee_shm *shm)
 	optee_supp_thrd_req(ctx, OPTEE_MSG_RPC_CMD_SHM_FREE, 1, &param);
 }
 
+static void cmd_free_host(struct tee_shm *shm, struct optee_session *session, uint64_t key)
+{
+	struct tee_param param;
+
+	param.attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INOUT;
+	param.u.value.a = OPTEE_MSG_RPC_SHM_TYPE_HOST;
+	param.u.value.b = tee_shm_get_id(shm);
+	param.u.value.c = 0;
+
+	tee_shm_put(shm);
+
+	optee_grpc_req(session, key, OPTEE_MSG_RPC_CMD_SHM_FREE, 1, &param);
+}
+
 static void handle_rpc_func_cmd_shm_free(struct tee_context *ctx,
 					 struct optee_msg_arg *arg)
 {
 	struct tee_shm *shm;
+	struct optee_context_data *ctxdata = ctx->data;
+	struct optee_session *sess;
+	size_t n;
 
 	arg->ret_origin = TEEC_ORIGIN_COMMS;
 
-	if (arg->num_params != 1 ||
+	if (!arg->num_params ||
 	    arg->params[0].attr != OPTEE_MSG_ATTR_TYPE_VALUE_INPUT) {
+		arg->ret = TEEC_ERROR_BAD_PARAMETERS;
+		return;
+	}
+
+	switch (arg->params[0].u.value.a) {
+	case OPTEE_MSG_RPC_SHM_TYPE_APPL:
+	case OPTEE_MSG_RPC_SHM_TYPE_KERNEL:
+		for (n = 1; n < arg->num_params; n++) {
+			if (arg->params[n].attr != OPTEE_MSG_ATTR_TYPE_NONE) {
+				arg->ret = TEEC_ERROR_BAD_PARAMETERS;
+				return;
+			}
+		}
+		break;
+	case OPTEE_MSG_RPC_SHM_TYPE_HOST:
+		if(arg->params[1].attr != OPTEE_MSG_ATTR_TYPE_VALUE_INPUT) {
+			arg->ret = TEEC_ERROR_BAD_PARAMETERS;
+			return;
+		}
+
+		for (n = 2; n < arg->num_params; n++) {
+			if (arg->params[n].attr != OPTEE_MSG_ATTR_TYPE_NONE) {
+				arg->ret = TEEC_ERROR_BAD_PARAMETERS;
+				return;
+			}
+		}
+		break;
+	default:
 		arg->ret = TEEC_ERROR_BAD_PARAMETERS;
 		return;
 	}
@@ -338,6 +441,16 @@ static void handle_rpc_func_cmd_shm_free(struct tee_context *ctx,
 	case OPTEE_MSG_RPC_SHM_TYPE_APPL:
 		cmd_free_suppl(ctx, shm);
 		break;
+	case OPTEE_MSG_RPC_SHM_TYPE_HOST:
+		mutex_lock(&ctxdata->mutex);
+		sess = optee_find_session(ctxdata, (u32)arg->params[1].u.value.a);
+		mutex_unlock(&ctxdata->mutex);
+		if (!sess) {
+			arg->ret = TEEC_ERROR_BAD_PARAMETERS;
+			return;
+		}
+
+		cmd_free_host(shm, sess, arg->params[1].u.value.b);
 	case OPTEE_MSG_RPC_SHM_TYPE_KERNEL:
 		tee_shm_free(shm);
 		break;
@@ -345,6 +458,48 @@ static void handle_rpc_func_cmd_shm_free(struct tee_context *ctx,
 		arg->ret = TEEC_ERROR_BAD_PARAMETERS;
 	}
 	arg->ret = TEEC_SUCCESS;
+}
+
+void handle_rpc_func_cmd_generic(struct tee_context *ctx, struct optee_msg_arg *arg);
+noinline void handle_rpc_func_cmd_generic(struct tee_context *ctx,
+					 struct optee_msg_arg *arg)
+{
+	struct optee_context_data *ctxdata = ctx->data;
+	struct optee_session *sess;
+	struct tee_param *params;
+	u32 key;
+	u32 func;
+
+	params = kmalloc_array(arg->num_params, sizeof(struct tee_param),
+			       GFP_KERNEL);
+	if (!params) {
+		arg->ret = TEEC_ERROR_OUT_OF_MEMORY;
+		return;
+	}
+
+	if (optee_from_msg_param(params, arg->num_params, arg->params)) {
+		arg->ret = TEEC_ERROR_BAD_PARAMETERS;
+		goto out;
+	}
+
+	mutex_lock(&ctxdata->mutex);
+	sess = optee_find_session(ctxdata, (u32)arg->params[0].u.value.b);
+	mutex_unlock(&ctxdata->mutex);
+	if (!sess) {
+		arg->ret = TEEC_ERROR_BAD_PARAMETERS;
+		goto out;
+	}
+
+	key = (u32)params[0].u.value.c;
+	func = (u32)params[0].u.value.a;
+	
+	arg->ret = optee_grpc_req(sess, key, func, arg->num_params, params);
+
+	if (optee_to_msg_param(arg->params, arg->num_params, params))
+		arg->ret = TEEC_ERROR_BAD_PARAMETERS;
+
+out:
+	kfree(params);
 }
 
 static void free_pages_list(struct optee_call_ctx *call_ctx)
@@ -390,6 +545,9 @@ static void handle_rpc_func_cmd(struct tee_context *ctx, struct optee *optee,
 		break;
 	case OPTEE_MSG_RPC_CMD_SHM_FREE:
 		handle_rpc_func_cmd_shm_free(ctx, arg);
+		break;
+	case OPTEE_MSG_RPC_CMD_GENERIC:
+		handle_rpc_func_cmd_generic(ctx, arg);
 		break;
 	default:
 		handle_rpc_supp_cmd(ctx, arg);
