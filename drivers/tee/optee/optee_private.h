@@ -73,6 +73,16 @@ struct optee_supp {
 	struct completion reqs_c;
 };
 
+struct optee_grpc {
+	struct mutex mutex;
+	struct tee_context *ctx;
+
+	int req_id;
+	struct list_head reqs;
+	struct idr idr;
+	struct completion reqs_c;
+};
+
 /**
  * struct optee - main service struct
  * @supp_teedev:	supplicant device
@@ -102,6 +112,8 @@ struct optee {
 struct optee_session {
 	struct list_head list_node;
 	u32 session_id;
+
+	struct optee_grpc grpc;
 };
 
 struct optee_context_data {
@@ -149,6 +161,9 @@ int optee_supp_recv(struct tee_context *ctx, u32 *func, u32 *num_params,
 int optee_supp_send(struct tee_context *ctx, u32 ret, u32 num_params,
 		    struct tee_param *param);
 
+void optee_grpc_init(struct optee_grpc *grpc);
+void optee_grpc_uninit(struct optee_grpc *grpc);
+
 u32 optee_do_call_with_arg(struct tee_context *ctx, phys_addr_t parg);
 int optee_open_session(struct tee_context *ctx,
 		       struct tee_ioctl_open_session_arg *arg,
@@ -171,6 +186,13 @@ int optee_shm_register_supp(struct tee_context *ctx, struct tee_shm *shm,
 			    unsigned long start);
 int optee_shm_unregister_supp(struct tee_context *ctx, struct tee_shm *shm);
 
+int optee_grpc_recv(struct tee_context *ctx, u32 session, u32 *key, u32 *func, u32 num_params,
+				struct tee_param *param);
+int optee_grpc_send(struct tee_context *ctx, struct tee_ioctl_grpc_send_arg *arg,
+		      struct tee_param *param);
+u32 optee_grpc_req(struct optee_session *sess, u32 key, u32 func, size_t num_params,
+		      struct tee_param *param);
+
 int optee_from_msg_param(struct tee_param *params, size_t num_params,
 			 const struct optee_msg_param *msg_params);
 int optee_to_msg_param(struct optee_msg_param *msg_params, size_t num_params,
@@ -180,6 +202,9 @@ u64 *optee_allocate_pages_list(size_t num_entries);
 void optee_free_pages_list(void *array, size_t num_entries);
 void optee_fill_pages_list(u64 *dst, struct page **pages, int num_pages,
 			   size_t page_offset);
+
+struct optee_session *optee_find_session(struct optee_context_data *ctxdata,
+					  u32 session_id);
 
 /*
  * Small helpers

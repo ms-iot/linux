@@ -635,6 +635,122 @@ out:
 	kfree(params);
 	return rc;
 }
+int tee_ioctl_grpc_recv(struct tee_context *ctx,
+			       struct tee_ioctl_buf_data __user *ubuf);
+ noinline int tee_ioctl_grpc_recv(struct tee_context *ctx,
+			       struct tee_ioctl_buf_data __user *ubuf)
+{
+	int rc;
+	struct tee_ioctl_buf_data buf;
+	struct tee_ioctl_grpc_recv_arg __user *uarg;
+	struct tee_param *params;
+	u32 session;
+	u32 key;
+	u32 func;
+	u32 num_params;
+
+	if (!ctx->teedev->desc->ops->grpc_recv)
+		return -EINVAL;
+
+	if (copy_from_user(&buf, ubuf, sizeof(buf)))
+		return -EFAULT;
+	
+	if (buf.buf_len > TEE_MAX_ARG_SIZE ||
+		buf.buf_len < sizeof(struct tee_ioctl_grpc_recv_arg))
+		return -EINVAL;
+	
+	uarg = u64_to_user_ptr(buf.buf_ptr);
+	if (get_user(num_params, &uarg->num_params) ||
+		get_user(session, &uarg->session))
+		return -EFAULT;
+	
+	if (sizeof(*uarg) + TEE_IOCTL_PARAM_SIZE(num_params) != buf.buf_len)
+		return -EINVAL;
+	
+	params = kcalloc(num_params, sizeof(struct tee_param), GFP_KERNEL);
+	if (!params)
+		return -ENOMEM;
+	
+	rc = params_from_user(ctx, params, num_params, uarg->params);
+	if (rc)
+		goto out;
+
+	rc = ctx->teedev->desc->ops->grpc_recv(ctx, session, &key, &func, num_params, params);
+	if (rc)
+		goto out;
+	
+	if (put_user(key, &uarg->key) ||
+		put_user(func, &uarg->func)) {
+		rc = -EFAULT;
+		goto out;
+	}
+
+	rc = params_to_supp(ctx, uarg->params, num_params, params);
+out:
+	kfree(params);
+	return rc;
+}
+
+static int tee_ioctl_grpc_send(struct tee_context *ctx,
+			       struct tee_ioctl_buf_data __user *ubuf)
+{
+	int rc;
+	size_t n;
+	struct tee_ioctl_buf_data buf;
+	struct tee_ioctl_grpc_send_arg __user *uarg;
+	struct tee_ioctl_grpc_send_arg arg;
+	struct tee_ioctl_param __user *uparams = NULL;
+	struct tee_param *params = NULL;
+
+	if (!ctx->teedev->desc->ops->grpc_recv)
+		return -EINVAL;
+
+	if (copy_from_user(&buf, ubuf, sizeof(buf)))
+		return -EFAULT;
+	
+	if (buf.buf_len > TEE_MAX_ARG_SIZE ||
+		buf.buf_len < sizeof(struct tee_ioctl_grpc_send_arg))
+		return -EINVAL;
+	
+	uarg = u64_to_user_ptr(buf.buf_ptr);
+	if (copy_from_user(&arg, uarg, sizeof(arg)))
+		return -EFAULT;
+	
+	if (sizeof(arg) + TEE_IOCTL_PARAM_SIZE(arg.num_params) != buf.buf_len)
+		return -EINVAL;
+	
+	if (arg.num_params) {
+		params = kcalloc(arg.num_params, sizeof(struct tee_param),
+						 GFP_KERNEL);
+		if (!params)
+			return -ENOMEM;
+		uparams = uarg->params;
+		rc = params_from_user(ctx, params, arg.num_params, uparams);
+		if (rc)
+			goto out;
+	}
+
+	rc = ctx->teedev->desc->ops->grpc_send(ctx, &arg, params);
+	if (rc)
+		goto out;
+	
+	if (put_user(arg.ret, &uarg->ret)) {
+		rc = -EFAULT;
+		goto out;
+	}
+	rc = params_to_user(uparams, arg.num_params, params);
+
+out:
+	if (params) {
+		/* Decrease ref count for all valid shared memory pointers */
+		for (n = 0; n < arg.num_params; n++)
+			if (tee_param_is_memref(params + n) &&
+			    params[n].u.memref.shm)
+				tee_shm_put(params[n].u.memref.shm);
+		kfree(params);
+	}
+	return rc;
+}
 
 static long tee_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
@@ -660,6 +776,10 @@ static long tee_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return tee_ioctl_supp_recv(ctx, uarg);
 	case TEE_IOC_SUPPL_SEND:
 		return tee_ioctl_supp_send(ctx, uarg);
+	case TEE_IOC_GRPC_RECV:
+		return tee_ioctl_grpc_recv(ctx, uarg);
+	case TEE_IOC_GRPC_SEND:
+		return tee_ioctl_grpc_send(ctx, uarg);
 	default:
 		return -EINVAL;
 	}
