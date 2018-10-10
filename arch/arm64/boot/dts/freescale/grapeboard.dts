@@ -18,7 +18,6 @@
 /dts-v1/;
 
 #include "fsl-ls1012a.dtsi"
-#include "include/dt-bindings/gpio/gpio.h"
 
 / {
 	model = "GrapeBoard";
