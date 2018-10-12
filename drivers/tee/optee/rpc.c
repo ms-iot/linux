@@ -455,11 +455,13 @@ static void handle_rpc_func_cmd_shm_free(struct tee_context *ctx,
 		}
 
 		cmd_free_host(shm, sess, arg->params[1].u.value.b);
+		break;
 	case OPTEE_MSG_RPC_SHM_TYPE_KERNEL:
 		tee_shm_free(shm);
 		break;
 	default:
 		arg->ret = TEEC_ERROR_BAD_PARAMETERS;
+		break;
 	}
 	arg->ret = TEEC_SUCCESS;
 }
