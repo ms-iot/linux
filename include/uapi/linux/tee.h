@@ -50,6 +50,7 @@
 
 #define TEE_GEN_CAP_GP		(1 << 0)/* GlobalPlatform compliant TEE */
 #define TEE_GEN_CAP_PRIVILEGED	(1 << 1)/* Privileged device (for supplicant) */
+#define TEE_GEN_CAP_REG_MEM	(1 << 2)/* Supports registering shared memory */
 
 /*
  * TEE Implementation ID
@@ -153,6 +154,13 @@ struct tee_ioctl_buf_data {
  * Mask for the type part of the attribute, leaves room for more types
  */
 #define TEE_IOCTL_PARAM_ATTR_TYPE_MASK		0xff
+
+/* Meta parameter carrying extra information about the message. */
+#define TEE_IOCTL_PARAM_ATTR_META		0x100
+
+/* Mask of all known attr bits */
+#define TEE_IOCTL_PARAM_ATTR_MASK \
+	(TEE_IOCTL_PARAM_ATTR_TYPE_MASK | TEE_IOCTL_PARAM_ATTR_META)
 
 /*
  * Matches TEEC_LOGIN_* in GP TEE Client API
@@ -330,6 +338,88 @@ struct tee_iocl_supp_send_arg {
  * tee_iocl_supp_send_arg followed by any array of struct tee_param
  */
 #define TEE_IOC_SUPPL_SEND	_IOR(TEE_IOC_MAGIC, TEE_IOC_BASE + 7, \
+				     struct tee_ioctl_buf_data)
+
+/**
+ * struct tee_ioctl_shm_register_data - Shared memory register argument
+ * @addr:      [in] Start address of shared memory to register
+ * @length:    [in/out] Length of shared memory to register
+ * @flags:     [in/out] Flags to/from registration.
+ * @id:                [out] Identifier of the shared memory
+ *
+ * The flags field should currently be zero as input. Updated by the call
+ * with actual flags as defined by TEE_IOCTL_SHM_* above.
+ * This structure is used as argument for TEE_IOC_SHM_REGISTER below.
+ */
+struct tee_ioctl_shm_register_data {
+	__u64 addr;
+	__u64 length;
+	__u32 flags;
+	__s32 id;
+};
+
+/**
+ * TEE_IOC_SHM_REGISTER - Register shared memory argument
+ *
+ * Registers shared memory between the user space process and secure OS.
+ *
+ * Returns a file descriptor on success or < 0 on failure
+ *
+ * The shared memory is unregisterred when the descriptor is closed.
+ */
+#define TEE_IOC_SHM_REGISTER   _IOWR(TEE_IOC_MAGIC, TEE_IOC_BASE + 9, \
+				     struct tee_ioctl_shm_register_data)
+
+/**
+ * struct tee_ioctl_grpc_recv_arg - Receive a request for a generic RPC function
+ * @func:	[in] generic RPC function
+ * @session:	[in] session ID
+ * @num_params	[in/out] number of parameters following this struct
+ *
+ * @num_params is the number of params that host application has room to
+ * receive when input, @num_params is the number of actual params
+ * host application receives when output.
+ */
+struct tee_ioctl_grpc_recv_arg {
+	__u32 func;
+	__u32 session;
+	__u32 num_params;
+	
+	/* num_params tells the actual number of element in params */
+	struct tee_ioctl_param params[];
+};
+
+/**
+ * TEE_IOC_GRPC_RECV - Receive a request for a generic RPC function
+ *
+ * Takes a struct tee_ioctl_buf_data which contains a struct
+ * tee_ioctl_grpc_recv_arg followed by any array of struct tee_param
+ */
+#define TEE_IOC_GRPC_RECV	_IOR(TEE_IOC_MAGIC, TEE_IOC_BASE + 10, \
+				     struct tee_ioctl_buf_data)
+
+/**
+ * struct tee_ioctl_grpc_send_arg - Send a response to a received request
+ * @ret:	[out] return value
+ * @session:	[in] session ID
+ * @num_params	[in] number of parameters following this struct
+ */
+struct tee_ioctl_grpc_send_arg {
+	__u32 ret;
+	__u32 session;
+	__u32 num_params;
+
+	/* num_params tells the actual number of element in params */
+	struct tee_ioctl_param params[];
+};
+
+/**
+ * TEE_IOC_GRPC_SEND - Receive a request for a generic RPC function
+ *
+ * Takes a struct tee_ioctl_buf_data which contains a struct
+ * tee_ioctl_grpc_send_arg followed by any array of struct tee_param
+ */
+#define TEE_IOC_GRPC_SEND	_IOR(TEE_IOC_MAGIC, TEE_IOC_BASE + 11, \
 				     struct tee_ioctl_buf_data)
 
 /*
