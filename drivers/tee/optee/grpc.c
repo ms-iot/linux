@@ -4,7 +4,6 @@
 struct optee_grpc_req {
 	struct list_head link;
 
-	u32 key;
 	u32 func;
 	u32 session_id;
 	u32 ret;
@@ -30,8 +29,8 @@ void optee_grpc_uninit(struct optee_grpc *grpc)
 	idr_destroy(&grpc->idr);
 }
 
-noinline u32 optee_grpc_req(struct optee_session *sess, u32 key, u32 func, size_t num_params,
-		      struct tee_param *param)
+u32 optee_grpc_req(struct optee_session *sess, u32 func, size_t num_params,
+		   struct tee_param *param)
 {
 	struct optee_grpc_req *req;
 	u32 ret;
@@ -42,7 +41,6 @@ noinline u32 optee_grpc_req(struct optee_session *sess, u32 key, u32 func, size_
 	}
 
 	init_completion(&req->c);
-	req->key = key;
 	req->func = func;
 	req->session_id = sess->session_id;
 	req->num_params = num_params;
@@ -90,7 +88,7 @@ static struct optee_grpc_req *grpc_pop_entry(struct optee_session *sess,
 	return req;
 }
 
-int optee_grpc_recv(struct tee_context *ctx, u32 session, u32 *key, u32 *func, u32 *num_params,
+int optee_grpc_recv(struct tee_context *ctx, u32 session, u32 *func, u32 *num_params,
 		    struct tee_param *param)
 {
 	struct optee_context_data *ctxdata = ctx->data;
@@ -123,7 +121,6 @@ int optee_grpc_recv(struct tee_context *ctx, u32 session, u32 *key, u32 *func, u
 	sess->grpc.req_id = id;
 	mutex_unlock(&sess->grpc.mutex);
 
-	*key = req->key;
 	*func = req->func;
 	*num_params = req->num_params;
 	memcpy(param, req->param,
@@ -158,7 +155,7 @@ static struct optee_grpc_req *grpc_pop_req(struct optee_session *sess,
 	return req;
 }
 
-int optee_grpc_send(struct tee_context *ctx, u32 session, u32 key, u32 ret, u32 num_params,
+int optee_grpc_send(struct tee_context *ctx, u32 session, u32 ret, u32 num_params,
 		    struct tee_param *param)
 {
 	struct optee_context_data *ctxdata = ctx->data;

@@ -200,8 +200,7 @@ static struct tee_shm *cmd_alloc_suppl(struct tee_context *ctx, size_t sz)
 	return shm;
 }
 
-struct tee_shm *cmd_alloc_host(struct tee_context *ctx, size_t sz, struct optee_session *session, uint64_t key);
-noinline struct tee_shm *cmd_alloc_host(struct tee_context *ctx, size_t sz, struct optee_session *session, uint64_t key)
+static struct tee_shm *cmd_alloc_host(struct tee_context *ctx, size_t sz, struct optee_session *session)
 {
 	u32 ret;
 	struct tee_param param;
@@ -213,7 +212,7 @@ noinline struct tee_shm *cmd_alloc_host(struct tee_context *ctx, size_t sz, stru
 	param.u.value.b = sz;
 	param.u.value.c = 0;
 
-	ret = optee_grpc_req(session, key, OPTEE_MSG_RPC_CMD_SHM_ALLOC, 1, &param);
+	ret = optee_grpc_req(session, OPTEE_MSG_RPC_CMD_SHM_ALLOC, 1, &param);
 	if (ret)
 		return ERR_PTR(-ENOMEM);
 
@@ -224,10 +223,7 @@ noinline struct tee_shm *cmd_alloc_host(struct tee_context *ctx, size_t sz, stru
 	return shm;
 }
 
-void handle_rpc_func_cmd_shm_alloc(struct tee_context *ctx,
-					  struct optee_msg_arg *arg,
-					  struct optee_call_ctx *call_ctx);
-noinline void handle_rpc_func_cmd_shm_alloc(struct tee_context *ctx,
+static void handle_rpc_func_cmd_shm_alloc(struct tee_context *ctx,
 					  struct optee_msg_arg *arg,
 					  struct optee_call_ctx *call_ctx)
 {
@@ -288,7 +284,7 @@ noinline void handle_rpc_func_cmd_shm_alloc(struct tee_context *ctx,
 			return;
 		}
 
-		shm = cmd_alloc_host(ctx, sz, sess, arg->params[1].u.value.b);
+		shm = cmd_alloc_host(ctx, sz, sess);
 		break;
 	case OPTEE_MSG_RPC_SHM_TYPE_KERNEL:
 		shm = tee_shm_alloc(ctx, sz, TEE_SHM_MAPPED);
@@ -382,7 +378,7 @@ static void cmd_free_suppl(struct tee_context *ctx, struct tee_shm *shm)
 	optee_supp_thrd_req(ctx, OPTEE_MSG_RPC_CMD_SHM_FREE, 1, &param);
 }
 
-static void cmd_free_host(struct tee_shm *shm, struct optee_session *session, uint64_t key)
+static void cmd_free_host(struct tee_shm *shm, struct optee_session *session)
 {
 	struct tee_param param;
 
@@ -393,7 +389,7 @@ static void cmd_free_host(struct tee_shm *shm, struct optee_session *session, ui
 
 	tee_shm_put(shm);
 
-	optee_grpc_req(session, key, OPTEE_MSG_RPC_CMD_SHM_FREE, 1, &param);
+	optee_grpc_req(session, OPTEE_MSG_RPC_CMD_SHM_FREE, 1, &param);
 }
 
 static void handle_rpc_func_cmd_shm_free(struct tee_context *ctx,
@@ -454,7 +450,7 @@ static void handle_rpc_func_cmd_shm_free(struct tee_context *ctx,
 			return;
 		}
 
-		cmd_free_host(shm, sess, arg->params[1].u.value.b);
+		cmd_free_host(shm, sess);
 		break;
 	case OPTEE_MSG_RPC_SHM_TYPE_KERNEL:
 		tee_shm_free(shm);
@@ -466,14 +462,12 @@ static void handle_rpc_func_cmd_shm_free(struct tee_context *ctx,
 	arg->ret = TEEC_SUCCESS;
 }
 
-void handle_rpc_func_cmd_generic(struct tee_context *ctx, struct optee_msg_arg *arg);
-noinline void handle_rpc_func_cmd_generic(struct tee_context *ctx,
-					 struct optee_msg_arg *arg)
+static void handle_rpc_func_cmd_generic(struct tee_context *ctx,
+					struct optee_msg_arg *arg)
 {
 	struct optee_context_data *ctxdata = ctx->data;
 	struct optee_session *sess;
 	struct tee_param *params;
-	u32 key;
 	u32 func;
 
 	params = kmalloc_array(arg->num_params, sizeof(struct tee_param),
@@ -496,10 +490,9 @@ noinline void handle_rpc_func_cmd_generic(struct tee_context *ctx,
 		goto out;
 	}
 
-	key = (u32)params[0].u.value.c;
 	func = arg->cmd;
 	
-	arg->ret = optee_grpc_req(sess, key, func, arg->num_params, params);
+	arg->ret = optee_grpc_req(sess, func, arg->num_params, params);
 
 	if (optee_to_msg_param(arg->params, arg->num_params, params))
 		arg->ret = TEEC_ERROR_BAD_PARAMETERS;
