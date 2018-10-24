@@ -636,16 +636,14 @@ out:
 	return rc;
 }
 
-int tee_ioctl_grpc_recv(struct tee_context *ctx, struct tee_ioctl_buf_data __user *ubuf);
-noinline int tee_ioctl_grpc_recv(struct tee_context *ctx,
-			       struct tee_ioctl_buf_data __user *ubuf)
+int tee_ioctl_grpc_recv(struct tee_context *ctx,
+			struct tee_ioctl_buf_data __user *ubuf)
 {
 	int rc;
 	struct tee_ioctl_buf_data buf;
 	struct tee_ioctl_grpc_recv_arg __user *uarg;
 	struct tee_param *params;
 	u32 session;
-	u32 key;
 	u32 func;
 	u32 num_params;
 
@@ -675,12 +673,11 @@ noinline int tee_ioctl_grpc_recv(struct tee_context *ctx,
 	if (rc)
 		goto out;
 
-	rc = ctx->teedev->desc->ops->grpc_recv(ctx, session, &key, &func, &num_params, params);
+	rc = ctx->teedev->desc->ops->grpc_recv(ctx, session, &func, &num_params, params);
 	if (rc)
 		goto out;
 	
-	if (put_user(key, &uarg->key) ||
-	    put_user(func, &uarg->func) ||
+	if (put_user(func, &uarg->func) ||
 	    put_user(num_params, &uarg->num_params)) {
 		rc = -EFAULT;
 		goto out;
@@ -692,8 +689,7 @@ out:
 	return rc;
 }
 
-int tee_ioctl_grpc_send(struct tee_context *ctx, struct tee_ioctl_buf_data __user *ubuf);
-noinline int tee_ioctl_grpc_send(struct tee_context *ctx,
+int tee_ioctl_grpc_send(struct tee_context *ctx,
 			       struct tee_ioctl_buf_data __user *ubuf)
 {
 	int rc;
@@ -702,7 +698,6 @@ noinline int tee_ioctl_grpc_send(struct tee_context *ctx,
 	struct tee_ioctl_param __user *uparams = NULL;
 	struct tee_param *params = NULL;
 	u32 session;
-	u32 key;
 	u32 ret;
 	u32 num_params;
 	
@@ -718,7 +713,6 @@ noinline int tee_ioctl_grpc_send(struct tee_context *ctx,
 	
 	uarg = u64_to_user_ptr(buf.buf_ptr);
 	if (get_user(session, &uarg->session) ||
-	    get_user(key, &uarg->key) ||
 	    get_user(ret, &uarg->ret) ||
 	    get_user(num_params, &uarg->num_params))
 		return -EFAULT;	
@@ -735,7 +729,7 @@ noinline int tee_ioctl_grpc_send(struct tee_context *ctx,
 	if (rc)
 		goto out;
 
-	rc = ctx->teedev->desc->ops->grpc_send(ctx, session, key, ret, num_params, params);
+	rc = ctx->teedev->desc->ops->grpc_send(ctx, session, ret, num_params, params);
 out:
 	kfree(params);
 	return rc;
