@@ -153,6 +153,12 @@ config TCG_VTPM_PROXY
 	  /dev/vtpmX and a server-side file descriptor on which the vTPM
 	  can receive commands.
 
+config TCG_FTPM_OPTEE
+	tristate "OP-TEE fTPM Interface"
+	depends on TEE && ARM64
+	---help---
+	  This driver proxies for an OP-TEE fTPM TA.
+
 
 source "drivers/char/tpm/st33zp24/Kconfig"
 endif # TCG_TPM
