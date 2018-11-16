@@ -184,6 +184,13 @@ struct tee_ioctl_buf_data {
  */
 #define TEE_IOCTL_PARAM_ATTR_TYPE_MASK		0xff
 
+/* Meta parameter carrying extra information about the message. */
+#define TEE_IOCTL_PARAM_ATTR_META		0x100
+
+/* Mask of all known attr bits */
+#define TEE_IOCTL_PARAM_ATTR_MASK \
+	(TEE_IOCTL_PARAM_ATTR_TYPE_MASK | TEE_IOCTL_PARAM_ATTR_META)
+
 /*
  * Matches TEEC_LOGIN_* in GP TEE Client API
  * Are only defined for GP compliant TEEs
@@ -391,6 +398,59 @@ struct tee_ioctl_shm_register_data {
  */
 #define TEE_IOC_SHM_REGISTER   _IOWR(TEE_IOC_MAGIC, TEE_IOC_BASE + 9, \
 				     struct tee_ioctl_shm_register_data)
+
+/**
+ * struct tee_ioctl_grpc_recv_arg - Receive a request for a generic RPC function
+ * @func:	[in] generic RPC function
+ * @session:	[in] session ID
+ * @num_params	[in/out] number of parameters following this struct
+ *
+ * @num_params is the number of params that host application has room to
+ * receive when input, @num_params is the number of actual params
+ * host application receives when output.
+ */
+struct tee_ioctl_grpc_recv_arg {
+	__u32 func;
+	__u32 session;
+	__u32 num_params;
+	
+	/* num_params tells the actual number of element in params */
+	struct tee_ioctl_param params[];
+};
+
+/**
+ * TEE_IOC_GRPC_RECV - Receive a request for a generic RPC function
+ *
+ * Takes a struct tee_ioctl_buf_data which contains a struct
+ * tee_ioctl_grpc_recv_arg followed by any array of struct tee_param
+ */
+#define TEE_IOC_GRPC_RECV	_IOR(TEE_IOC_MAGIC, TEE_IOC_BASE + 10, \
+				     struct tee_ioctl_buf_data)
+
+/**
+ * struct tee_ioctl_grpc_send_arg - Send a response to a received request
+ * @ret:	[out] return value
+ * @session:	[in] session ID
+ * @num_params	[in] number of parameters following this struct
+ */
+struct tee_ioctl_grpc_send_arg {
+	__u32 ret;
+	__u32 session;
+	__u32 num_params;
+
+	/* num_params tells the actual number of element in params */
+	struct tee_ioctl_param params[];
+};
+
+/**
+ * TEE_IOC_GRPC_SEND - Receive a request for a generic RPC function
+ *
+ * Takes a struct tee_ioctl_buf_data which contains a struct
+ * tee_ioctl_grpc_send_arg followed by any array of struct tee_param
+ */
+#define TEE_IOC_GRPC_SEND	_IOR(TEE_IOC_MAGIC, TEE_IOC_BASE + 11, \
+				     struct tee_ioctl_buf_data)
+
 /*
  * Five syscalls are used when communicating with the TEE driver.
  * open(): opens the device associated with the driver

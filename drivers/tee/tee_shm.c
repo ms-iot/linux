@@ -127,9 +127,9 @@ static const struct dma_buf_ops tee_shm_dma_buf_ops = {
 	.mmap = tee_shm_op_mmap,
 };
 
-struct tee_shm *__tee_shm_alloc(struct tee_context *ctx,
-				struct tee_device *teedev,
-				size_t size, u32 flags)
+static struct tee_shm *__tee_shm_alloc(struct tee_context *ctx,
+				       struct tee_device *teedev,
+				       size_t size, u32 flags)
 {
 	struct tee_shm_pool_mgr *poolm = NULL;
 	struct tee_shm *shm;
@@ -298,7 +298,7 @@ struct tee_shm *tee_shm_register(struct tee_context *ctx, unsigned long addr,
 	if (rc > 0)
 		shm->num_pages = rc;
 	if (rc != num_pages) {
-		if (rc > 0)
+		if (rc >= 0)
 			rc = -ENOMEM;
 		ret = ERR_PTR(rc);
 		goto err;
@@ -314,7 +314,7 @@ struct tee_shm *tee_shm_register(struct tee_context *ctx, unsigned long addr,
 	}
 
 	rc = teedev->desc->ops->shm_register(ctx, shm, shm->pages,
-					     shm->num_pages);
+					     shm->num_pages, start);
 	if (rc) {
 		ret = ERR_PTR(rc);
 		goto err;
@@ -350,9 +350,11 @@ err:
 			idr_remove(&teedev->idr, shm->id);
 			mutex_unlock(&teedev->mutex);
 		}
-		for (n = 0; n < shm->num_pages; n++)
-			put_page(shm->pages[n]);
-		kfree(shm->pages);
+		if (shm->pages) {
+			for (n = 0; n < shm->num_pages; n++)
+				put_page(shm->pages[n]);
+			kfree(shm->pages);
+		}
 	}
 	kfree(shm);
 	teedev_ctx_put(ctx);
@@ -605,17 +607,6 @@ struct tee_shm *tee_shm_get_from_id(struct tee_context *ctx, int id)
 	return shm;
 }
 EXPORT_SYMBOL_GPL(tee_shm_get_from_id);
-
-/**
- * tee_shm_get_id() - Get id of a shared memory object
- * @shm:	Shared memory handle
- * @returns id
- */
-int tee_shm_get_id(struct tee_shm *shm)
-{
-	return shm->id;
-}
-EXPORT_SYMBOL_GPL(tee_shm_get_id);
 
 /**
  * tee_shm_put() - Decrease reference count on a shared memory handle

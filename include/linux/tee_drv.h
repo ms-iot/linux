@@ -87,6 +87,8 @@ struct tee_param {
  * @cancel_req:		request cancel of an ongoing invoke or open
  * @supp_revc:		called for supplicant to get a command
  * @supp_send:		called for supplicant to send a response
+ * @grpc_revc:		called for a host application to get a command
+ * @grpc_send:		called for a host application to send a response
  * @shm_register:	register shared memory buffer in TEE
  * @shm_unregister:	unregister shared memory buffer in TEE
  */
@@ -107,8 +109,13 @@ struct tee_driver_ops {
 			 struct tee_param *param);
 	int (*supp_send)(struct tee_context *ctx, u32 ret, u32 num_params,
 			 struct tee_param *param);
+	int (*grpc_recv)(struct tee_context *ctx, u32 session, u32 *func, u32 *num_params,
+			 struct tee_param *param);
+	int (*grpc_send)(struct tee_context *ctx, u32 session, u32 ret, u32 num_params,
+		    struct tee_param *param);
 	int (*shm_register)(struct tee_context *ctx, struct tee_shm *shm,
-			    struct page **pages, size_t num_pages);
+			    struct page **pages, size_t num_pages,
+			    unsigned long start);
 	int (*shm_unregister)(struct tee_context *ctx, struct tee_shm *shm);
 };
 
@@ -411,11 +418,47 @@ void *tee_shm_get_va(struct tee_shm *shm, size_t offs);
 int tee_shm_get_pa(struct tee_shm *shm, size_t offs, phys_addr_t *pa);
 
 /**
+ * tee_shm_get_size() - Get size of shared memory buffer
+ * @shm:	Shared memory handle
+ * @returns size of shared memory
+ */
+static inline size_t tee_shm_get_size(struct tee_shm *shm)
+{
+	return shm->size;
+}
+
+/**
+ * tee_shm_get_pages() - Get list of pages that hold shared buffer
+ * @shm:	Shared memory handle
+ * @num_pages:	Number of pages will be stored there
+ * @returns pointer to pages array
+ */
+static inline struct page **tee_shm_get_pages(struct tee_shm *shm,
+					      size_t *num_pages)
+{
+	*num_pages = shm->num_pages;
+	return shm->pages;
+}
+
+/**
+ * tee_shm_get_page_offset() - Get shared buffer offset from page start
+ * @shm:	Shared memory handle
+ * @returns page offset of shared buffer
+ */
+static inline size_t tee_shm_get_page_offset(struct tee_shm *shm)
+{
+	return shm->offset;
+}
+
+/**
  * tee_shm_get_id() - Get id of a shared memory object
  * @shm:	Shared memory handle
  * @returns id
  */
-int tee_shm_get_id(struct tee_shm *shm);
+static inline int tee_shm_get_id(struct tee_shm *shm)
+{
+	return shm->id;
+}
 
 /**
  * tee_shm_get_from_id() - Find shared memory object and increase reference
