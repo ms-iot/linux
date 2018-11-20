@@ -22,13 +22,17 @@
 
 #define FTPM_OPTEE_TA_SUBMIT_COMMAND  0
 
+#define FTPM_RESPONSE_SIZE_MAX        TPM_BUFSIZE
+#define FTPM_SHM_SIZE                 (TPM_BUFSIZE + FTPM_RESPONSE_SIZE_MAX)
+
 struct tpm_tee_context 
 {
 	struct tpm_chip *chip;
 
+	size_t response_offset;
 	size_t response_length;
-	struct mutex response_buffer_lock;
-	u8 response_buffer[TPM_BUFSIZE];
+
+	struct tee_shm *shm;
 
 	struct tee_context *optee_context;
 
@@ -45,21 +49,22 @@ static int ftpm_optee_tpm_op_recv(struct tpm_chip *chip, u8 *buf, size_t len)
 	size_t response_length;
 	int rc;
 
-	mutex_lock(&tpm_tee_context.response_buffer_lock);
-
 	response_length = tpm_tee_context.response_length;
 	if (len < response_length) {
 		rc = -EIO;
 		goto cleanup;
 	}
 
-	memcpy(buf, tpm_tee_context.response_buffer, response_length);
+	memcpy(
+		buf, 
+		tpm_tee_context.shm->kaddr + tpm_tee_context.response_offset, 
+		tpm_tee_context.response_length);
+
 	tpm_tee_context.response_length = 0;
 
 	rc = response_length;
 
 cleanup:
-	mutex_unlock(&tpm_tee_context.response_buffer_lock);
 	return rc;
 }
 
@@ -76,37 +81,30 @@ static int ftpm_optee_tpm_op_send(struct tpm_chip *chip, u8 *buf, size_t len)
 		{ .attr = TEE_IOCTL_PARAM_ATTR_TYPE_NONE }
 	};
 	struct tee_ioctl_invoke_arg submit_command_args;
-	struct tee_shm *shm = NULL;
 
-	mutex_lock(&tpm_tee_context.response_buffer_lock);
+	if (len > (FTPM_SHM_SIZE - FTPM_RESPONSE_SIZE_MAX)) {
+		rc = -EIO;
+		goto cleanup;
+	}
 
+	tpm_tee_context.response_offset = len;
 	tpm_tee_context.response_length = 0;
+	memset(tpm_tee_context.shm->kaddr, 0, FTPM_SHM_SIZE);
 
 	submit_command_args.func = FTPM_OPTEE_TA_SUBMIT_COMMAND;
 	submit_command_args.session = tpm_tee_context.optee_session_id;
 	submit_command_args.num_params = TEEC_CONFIG_PAYLOAD_REF_COUNT;
 
-	shm = tee_shm_alloc(
-		tpm_tee_context.optee_context, 
-		len + sizeof(tpm_tee_context.response_buffer), 
-		TEE_SHM_MAPPED | TEE_SHM_DMA_BUF);
-
-	if (IS_ERR(shm)) {
-		rc = -ENOMEM;
-		shm = NULL;
-		goto cleanup;
-	}
-
 	// request
 	submit_command_params[0].u.memref.size = len;
-	submit_command_params[0].u.memref.shm = shm;
+	submit_command_params[0].u.memref.shm = tpm_tee_context.shm;
 	submit_command_params[0].u.memref.shm_offs = 0;
 	memcpy(submit_command_params[0].u.memref.shm->kaddr, buf, len);
 
 	// response
-	submit_command_params[1].u.memref.size = sizeof(tpm_tee_context.response_buffer);
-	submit_command_params[1].u.memref.shm = shm;
-	submit_command_params[1].u.memref.shm_offs = len;
+	submit_command_params[1].u.memref.size = FTPM_RESPONSE_SIZE_MAX;
+	submit_command_params[1].u.memref.shm = tpm_tee_context.shm;
+	submit_command_params[1].u.memref.shm_offs = tpm_tee_context.response_offset;
 
 	rc = tee_client_invoke_func(
 		tpm_tee_context.optee_context, 
@@ -122,22 +120,14 @@ static int ftpm_optee_tpm_op_send(struct tpm_chip *chip, u8 *buf, size_t len)
 	response_header = (struct tpm_output_header*)response_buffer;
 	response_length = be32_to_cpu(response_header->length);
 
-	if (response_length > sizeof(tpm_tee_context.response_buffer)) {
+	if (response_length > FTPM_RESPONSE_SIZE_MAX) {
 		rc = -EIO;
 		goto cleanup;
 	}
 
-	memcpy(
-		tpm_tee_context.response_buffer, 
-		response_buffer, 
-		response_length);
 	tpm_tee_context.response_length = response_length;
 
 cleanup:
-	if (shm)
-		tee_shm_free(shm);
-
-	mutex_unlock(&tpm_tee_context.response_buffer_lock);
 	return rc;
 }
 
@@ -186,11 +176,14 @@ static void ftpm_optee_cleanup(void)
 			tpm_tee_context.optee_session_opened = FALSE;
 		}
 
+		if (tpm_tee_context.shm) {
+			tee_shm_free(tpm_tee_context.shm);
+			tpm_tee_context.shm = NULL;
+		}
+
 		tee_client_close_context(tpm_tee_context.optee_context);
 		tpm_tee_context.optee_context = NULL;
 	}
-
-	mutex_destroy(&tpm_tee_context.response_buffer_lock);
 }
 
 static int ftpm_optee_match_func(
@@ -208,6 +201,8 @@ static int ftpm_optee_match_func(
 static int __init ftpm_optee_module_init(void)
 {
 	int rc;
+	struct tee_context *optee_context;
+	struct tee_shm *shm;
 	struct tpm_chip *chip;
 
 	// bc50d971-d4c9-42c4-82cb-343fb7f37896	
@@ -227,19 +222,28 @@ static int __init ftpm_optee_module_init(void)
 		{ .attr = TEE_IOCTL_PARAM_ATTR_TYPE_NONE }
 	};
 
-	mutex_init(&tpm_tee_context.response_buffer_lock);
-
-	tpm_tee_context.optee_context = tee_client_open_context(
+	optee_context = tee_client_open_context(
 		NULL, 
 		ftpm_optee_match_func, 
 		NULL,
 		NULL);
 
-	if (IS_ERR(tpm_tee_context.optee_context))	{
-		rc = PTR_ERR(tpm_tee_context.optee_context);
-		tpm_tee_context.optee_context = NULL;
+	if (IS_ERR(optee_context))	{
+		rc = PTR_ERR(optee_context);
 		goto cleanup;
 	}
+	tpm_tee_context.optee_context = optee_context; 
+
+	shm = tee_shm_alloc(
+		tpm_tee_context.optee_context, 
+		FTPM_SHM_SIZE, 
+		TEE_SHM_MAPPED | TEE_SHM_DMA_BUF);
+
+	if (IS_ERR(shm)) {
+		rc = PTR_ERR(shm);
+		goto cleanup;
+	}
+	tpm_tee_context.shm = shm;
 
 	rc = tee_client_open_session(
 		tpm_tee_context.optee_context, 
@@ -259,7 +263,6 @@ static int __init ftpm_optee_module_init(void)
 		rc = PTR_ERR(chip);
 		goto cleanup;
 	}
-
 	tpm_tee_context.chip = chip;
 
 	tpm_tee_context.chip->flags |= TPM_CHIP_FLAG_TPM2;
