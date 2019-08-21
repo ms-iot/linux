@@ -294,7 +294,7 @@ static void optee_release(struct tee_context *ctx)
 			memset(arg, 0, sizeof(*arg));
 			arg->cmd = OPTEE_MSG_CMD_CLOSE_SESSION;
 			arg->session = sess->session_id;
-			optee_do_call_with_arg(ctx, parg);
+			optee_do_call_with_arg(ctx, U32_MAX, parg);
 		}
 		kfree(sess);
 	}

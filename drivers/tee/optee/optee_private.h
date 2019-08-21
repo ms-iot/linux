@@ -138,6 +138,7 @@ struct optee_call_ctx {
 	/* information about pages list used in last allocation */
 	void *pages_list;
 	size_t num_entries;
+	u32 session_id;
 };
 
 void optee_handle_rpc(struct tee_context *ctx, struct optee_rpc_param *param,
@@ -164,7 +165,7 @@ int optee_supp_send(struct tee_context *ctx, u32 ret, u32 num_params,
 void optee_grpc_init(struct optee_grpc *grpc);
 void optee_grpc_uninit(struct optee_grpc *grpc);
 
-u32 optee_do_call_with_arg(struct tee_context *ctx, phys_addr_t parg);
+u32 optee_do_call_with_arg(struct tee_context *ctx, u32 session_id, phys_addr_t parg);
 int optee_open_session(struct tee_context *ctx,
 		       struct tee_ioctl_open_session_arg *arg,
 		       struct tee_param *param);
