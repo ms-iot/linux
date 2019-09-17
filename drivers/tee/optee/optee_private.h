@@ -68,6 +68,26 @@ struct optee_supp {
 };
 
 /**
+ * struct optee_gen_rpc - generic RPC synchronization struct
+ * @mutex:		held while accessing the content of this struct
+ * @req_id:		current request id if host is doing synchronous
+ *			communication, else -1
+ * @reqs:		queued requests not yet retrieved by host
+ * @idr:		IDR holding all requests currently being processed
+ *			by host
+ * @reqs_c:		completion used by host when waiting for a
+ *			request to be queued
+ */
+struct optee_grpc {
+	struct mutex mutex;
+
+	int req_id;
+	struct list_head reqs;
+	struct idr idr;
+	struct completion reqs_c;
+};
+
+/**
  * struct optee - main service struct
  * @supp_teedev:	supplicant device
  * @teedev:		client device
@@ -96,6 +116,7 @@ struct optee {
 struct optee_session {
 	struct list_head list_node;
 	u32 session_id;
+	struct optee_grpc grpc;
 };
 
 struct optee_context_data {
@@ -144,6 +165,17 @@ int optee_supp_recv(struct tee_context *ctx, u32 *func, u32 *num_params,
 		    struct tee_param *param);
 int optee_supp_send(struct tee_context *ctx, u32 ret, u32 num_params,
 		    struct tee_param *param);
+
+u32 optee_grpc_thrd_req(struct optee_session *sess, u32 func, size_t num_params,
+			struct tee_param *param);
+
+int optee_grpc_recv(struct tee_context *ctx, u32 session, u32 *func, u32 *num_params,
+		    struct tee_param *param);
+int optee_grpc_send(struct tee_context *ctx, u32 session, u32 ret, u32 num_params,
+		    struct tee_param *param);
+
+void optee_grpc_init(struct optee_grpc *grpc);
+void optee_grpc_uninit(struct optee_grpc *grpc);
 
 u32 optee_do_call_with_arg(struct tee_context *ctx, u32 session_id, phys_addr_t parg);
 int optee_open_session(struct tee_context *ctx,
