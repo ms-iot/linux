@@ -175,6 +175,9 @@ void optee_fill_pages_list(u64 *dst, struct page **pages, int num_pages,
 
 int optee_enumerate_devices(void);
 
+struct optee_session *optee_find_session(struct optee_context_data *ctxdata,
+					 u32 session_id);
+
 /*
  * Small helpers
  */

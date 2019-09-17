@@ -100,7 +100,7 @@ static void optee_cq_wait_final(struct optee_call_queue *cq,
 }
 
 /* Requires the filpstate mutex to be held */
-static struct optee_session *find_session(struct optee_context_data *ctxdata,
+struct optee_session *optee_find_session(struct optee_context_data *ctxdata,
 					  u32 session_id)
 {
 	struct optee_session *sess;
@@ -286,7 +286,7 @@ int optee_close_session(struct tee_context *ctx, u32 session)
 
 	/* Check that the session is valid and remove it from the list */
 	mutex_lock(&ctxdata->mutex);
-	sess = find_session(ctxdata, session);
+	sess = optee_find_session(ctxdata, session);
 	if (sess)
 		list_del(&sess->list_node);
 	mutex_unlock(&ctxdata->mutex);
@@ -318,7 +318,7 @@ int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 
 	/* Check that the session is valid */
 	mutex_lock(&ctxdata->mutex);
-	sess = find_session(ctxdata, arg->session);
+	sess = optee_find_session(ctxdata, arg->session);
 	mutex_unlock(&ctxdata->mutex);
 	if (!sess)
 		return -EINVAL;
@@ -362,7 +362,7 @@ int optee_cancel_req(struct tee_context *ctx, u32 cancel_id, u32 session)
 
 	/* Check that the session is valid */
 	mutex_lock(&ctxdata->mutex);
-	sess = find_session(ctxdata, session);
+	sess = optee_find_session(ctxdata, session);
 	mutex_unlock(&ctxdata->mutex);
 	if (!sess)
 		return -EINVAL;
