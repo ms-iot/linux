@@ -85,8 +85,10 @@ struct tee_param {
  * @close_session:	close a session
  * @invoke_func:	invoke a trusted function
  * @cancel_req:		request cancel of an ongoing invoke or open
- * @supp_revc:		called for supplicant to get a command
+ * @supp_recv:		called for supplicant to get a command
  * @supp_send:		called for supplicant to send a response
+ * @grpc_recv:		called for a host application to get a command
+ * @grpc_send:		called for a host application to send a response
  * @shm_register:	register shared memory buffer in TEE
  * @shm_unregister:	unregister shared memory buffer in TEE
  */
@@ -106,6 +108,10 @@ struct tee_driver_ops {
 	int (*supp_recv)(struct tee_context *ctx, u32 *func, u32 *num_params,
 			 struct tee_param *param);
 	int (*supp_send)(struct tee_context *ctx, u32 ret, u32 num_params,
+			 struct tee_param *param);
+	int (*grpc_recv)(struct tee_context *ctx, u32 session, u32 *func, u32 *num_params,
+			 struct tee_param *param);
+	int (*grpc_send)(struct tee_context *ctx, u32 session, u32 ret, u32 num_params,
 			 struct tee_param *param);
 	int (*shm_register)(struct tee_context *ctx, struct tee_shm *shm,
 			    struct page **pages, size_t num_pages,
