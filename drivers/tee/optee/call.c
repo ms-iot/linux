@@ -101,7 +101,7 @@ static void optee_cq_wait_final(struct optee_call_queue *cq,
 
 /* Requires the filpstate mutex to be held */
 struct optee_session *optee_find_session(struct optee_context_data *ctxdata,
-					  u32 session_id)
+					 u32 session_id)
 {
 	struct optee_session *sess;
 
@@ -254,6 +254,7 @@ int optee_open_session(struct tee_context *ctx,
 	if (msg_arg->ret == TEEC_SUCCESS) {
 		/* A new session has been created, add it to the list. */
 		sess->session_id = msg_arg->session;
+		optee_grpc_init(&sess->grpc);
 		mutex_lock(&ctxdata->mutex);
 		list_add(&sess->list_node, &ctxdata->sess_list);
 		mutex_unlock(&ctxdata->mutex);
@@ -288,8 +289,10 @@ int optee_close_session(struct tee_context *ctx, u32 session)
 	/* Check that the session is valid and remove it from the list */
 	mutex_lock(&ctxdata->mutex);
 	sess = optee_find_session(ctxdata, session);
-	if (sess)
+	if (sess) {
+		optee_grpc_uninit(&sess->grpc);
 		list_del(&sess->list_node);
+	}
 	mutex_unlock(&ctxdata->mutex);
 	if (!sess)
 		return -EINVAL;
