@@ -308,6 +308,8 @@ static const struct tee_driver_ops optee_ops = {
 	.close_session = optee_close_session,
 	.invoke_func = optee_invoke_func,
 	.cancel_req = optee_cancel_req,
+	.grpc_recv = optee_grpc_recv,
+	.grpc_send = optee_grpc_send,
 	.shm_register = optee_shm_register,
 	.shm_unregister = optee_shm_unregister,
 };
