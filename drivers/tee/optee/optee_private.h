@@ -14,6 +14,8 @@
 
 #define OPTEE_MAX_ARG_SIZE	1024
 
+#define OPTEE_INVALID_SESSION_ID	0
+
 /* Some Global Platform error codes used in this driver */
 #define TEEC_SUCCESS			0x00000000
 #define TEEC_ERROR_BAD_PARAMETERS	0xFFFF0006
@@ -115,6 +117,8 @@ struct optee_rpc_param {
 
 /* Holds context that is preserved during one STD call */
 struct optee_call_ctx {
+	u32 session_id;
+
 	/* information about pages list used in last allocation */
 	void *pages_list;
 	size_t num_entries;
@@ -141,7 +145,7 @@ int optee_supp_recv(struct tee_context *ctx, u32 *func, u32 *num_params,
 int optee_supp_send(struct tee_context *ctx, u32 ret, u32 num_params,
 		    struct tee_param *param);
 
-u32 optee_do_call_with_arg(struct tee_context *ctx, phys_addr_t parg);
+u32 optee_do_call_with_arg(struct tee_context *ctx, u32 session_id, phys_addr_t parg);
 int optee_open_session(struct tee_context *ctx,
 		       struct tee_ioctl_open_session_arg *arg,
 		       struct tee_param *param);
