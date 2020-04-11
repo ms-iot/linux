@@ -219,6 +219,8 @@ static void optee_get_version(struct tee_device *teedev,
 		v.gen_caps |= TEE_GEN_CAP_REG_MEM;
 	if (optee->sec_caps & OPTEE_SMC_SEC_CAP_MEMREF_NULL)
 		v.gen_caps |= TEE_GEN_CAP_MEMREF_NULL;
+	if (optee->sec_caps & OPTEE_SMC_SEC_CAP_OCALL)
+		v.gen_caps |= TEE_GEN_CAP_OCALL;
 	*vers = v;
 }
 
