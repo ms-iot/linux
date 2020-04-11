@@ -503,6 +503,9 @@ int optee_shm_register(struct tee_context *ctx, struct tee_shm *shm,
 	phys_addr_t msg_parg;
 	int rc;
 
+	if (shm->flags & TEE_SHM_OCALL)
+		return 0;
+
 	if (!num_pages)
 		return -EINVAL;
 
@@ -551,6 +554,9 @@ int optee_shm_unregister(struct tee_context *ctx, struct tee_shm *shm)
 	struct optee_msg_arg *msg_arg;
 	phys_addr_t msg_parg;
 	int rc = 0;
+
+	if (shm->flags & TEE_SHM_OCALL)
+		return 0;
 
 	shm_arg = get_msg_arg(ctx, 1, &msg_arg, &msg_parg);
 	if (IS_ERR(shm_arg))
