@@ -113,6 +113,11 @@ struct optee_rpc_param {
 	u32	a7;
 };
 
+struct optee_call_waiter {
+	struct list_head list_node;
+	struct completion c;
+};
+
 /* Holds context that is preserved during one STD call */
 struct optee_call_ctx {
 	/* information about pages list used in last allocation */
@@ -174,6 +179,14 @@ void optee_fill_pages_list(u64 *dst, struct page **pages, int num_pages,
 			   size_t page_offset);
 
 int optee_enumerate_devices(void);
+
+void optee_cq_wait_init(struct optee_call_queue *cq,
+			struct optee_call_waiter *w);
+void optee_cq_wait_for_completion(struct optee_call_queue *cq,
+				  struct optee_call_waiter *w);
+void optee_cq_complete_one(struct optee_call_queue *cq);
+void optee_cq_wait_final(struct optee_call_queue *cq,
+			 struct optee_call_waiter *w);
 
 /*
  * Small helpers
