@@ -250,11 +250,17 @@ static int optee_open(struct tee_context *ctx)
 
 	mutex_init(&ctxdata->mutex);
 	INIT_LIST_HEAD(&ctxdata->sess_list);
+	idr_init(&ctxdata->ocalls);
 
 	if (optee->sec_caps & OPTEE_SMC_SEC_CAP_MEMREF_NULL)
-		ctx->cap_memref_null  = true;
+		ctx->cap_memref_null = true;
 	else
 		ctx->cap_memref_null = false;
+
+	if (optee->sec_caps & OPTEE_SMC_SEC_CAP_OCALL)
+		ctx->cap_ocall = true;
+	else
+		ctx->cap_ocall = false;
 
 	ctx->data = ctxdata;
 	return 0;
@@ -310,9 +316,16 @@ static void optee_release(struct tee_context *ctx)
 		optee_supp_release(&optee->supp);
 }
 
+static void optee_pre_release(struct tee_context *ctx)
+{
+	/* Let the OCALLs system that this context is going bye-bye */
+	optee_ocall_notify_context_release(ctx);
+}
+
 static const struct tee_driver_ops optee_ops = {
 	.get_version = optee_get_version,
 	.open = optee_open,
+	.pre_release = optee_pre_release,
 	.release = optee_release,
 	.open_session = optee_open_session,
 	.close_session = optee_close_session,

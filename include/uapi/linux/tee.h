@@ -192,9 +192,14 @@ struct tee_ioctl_buf_data {
 /* Meta parameter carrying extra information about the message. */
 #define TEE_IOCTL_PARAM_ATTR_META		0x100
 
+/* Parameter carrying information about an OCALL reply or request. */
+#define TEE_IOCTL_PARAM_ATTR_OCALL		0x200
+
 /* Mask of all known attr bits */
 #define TEE_IOCTL_PARAM_ATTR_MASK \
-	(TEE_IOCTL_PARAM_ATTR_TYPE_MASK | TEE_IOCTL_PARAM_ATTR_META)
+	(TEE_IOCTL_PARAM_ATTR_TYPE_MASK | \
+	 TEE_IOCTL_PARAM_ATTR_META      | \
+	 TEE_IOCTL_PARAM_ATTR_OCALL)
 
 /*
  * Matches TEEC_LOGIN_* in GP TEE Client API
@@ -277,6 +282,51 @@ struct tee_ioctl_open_session_arg {
  */
 #define TEE_IOC_OPEN_SESSION	_IOR(TEE_IOC_MAGIC, TEE_IOC_BASE + 2, \
 				     struct tee_ioctl_buf_data)
+
+/**
+ * TEE_IOCTL_OCALL_GET_ID - Decode the OCALL ID from the OCALL meta parameter
+ * OCALL ID and OCALL Function pair
+ */
+#define TEE_IOCTL_OCALL_GET_ID(x)		((__u32)((x) >> 32))
+
+/**
+ * TEE_IOCTL_OCALL_GET_FUNC - Decode the OCALL Function from the OCALL meta
+ * parameter OCALL ID and OCALL Function pair
+ */
+#define TEE_IOCTL_OCALL_GET_FUNC(x)		((__u32)(x))
+
+/**
+ * TEE_IOCTL_OCALL_MAKE_PAIR - Encode an OCALL Function and an OCALL ID into an
+ * encoded pair
+ */
+#define TEE_IOCTL_OCALL_MAKE_PAIR(func, id)	((((__u64)(id)) << 32) | (func))
+
+/*
+ * Command sent to the CA to request allocation of shared memory to carry the
+ * parameters of an OCALL
+ *
+ * [out] param[0].u.value.a		SHM ID
+ * [in]  param[0].u.value.b		requested memory size
+ *
+ * Note: [in] means from driver to CA, [out], from CA to driver.
+ */
+#define TEE_IOCTL_OCALL_CMD_SHM_ALLOC	1
+
+/*
+ * Command sent to the CA to free previously allocated shared memory.
+ *
+ * [in] param[0].u.value.a		SHM ID
+ *
+ * Note: [in] means from driver to CA.
+ */
+#define TEE_IOCTL_OCALL_CMD_SHM_FREE	2
+
+/*
+ * Command sent to the CA to execute an OCALL by Id.
+ *
+ * [any] param[0..3].u.*		carry OCALL parameters
+ */
+#define TEE_IOCTL_OCALL_CMD_INVOKE	3
 
 /**
  * struct tee_ioctl_invoke_func_arg - Invokes a function in a Trusted

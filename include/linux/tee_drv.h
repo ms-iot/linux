@@ -58,6 +58,7 @@ struct tee_context {
 	bool releasing;
 	bool supp_nowait;
 	bool cap_memref_null;
+	bool cap_ocall;
 };
 
 struct tee_param_memref {
@@ -84,6 +85,7 @@ struct tee_param {
  * struct tee_driver_ops - driver operations vtable
  * @get_version:	returns version of driver
  * @open:		called when the device file is opened
+ * @pre_release:	called prior to context release, before release proper
  * @release:		release this open file
  * @open_session:	open a new session
  * @close_session:	close a session
@@ -98,6 +100,7 @@ struct tee_driver_ops {
 	void (*get_version)(struct tee_device *teedev,
 			    struct tee_ioctl_version_data *vers);
 	int (*open)(struct tee_context *ctx);
+	void (*pre_release)(struct tee_context *ctx);
 	void (*release)(struct tee_context *ctx);
 	int (*open_session)(struct tee_context *ctx,
 			    struct tee_ioctl_open_session_arg *arg,
@@ -174,7 +177,8 @@ void tee_device_unregister(struct tee_device *teedev);
  * struct tee_shm - shared memory object
  * @teedev:	device used to allocate the object
  * @ctx:	context using the object, if NULL the context is gone
- * @link	link element
+ * @link:	link element
+ * @ocall_link:	link element for when the SHM is used during an OCALL request
  * @paddr:	physical address of the shared memory
  * @kaddr:	virtual address of the shared memory
  * @size:	size of shared memory
@@ -192,6 +196,7 @@ struct tee_shm {
 	struct tee_device *teedev;
 	struct tee_context *ctx;
 	struct list_head link;
+	struct list_head ocall_link;
 	phys_addr_t paddr;
 	void *kaddr;
 	size_t size;
@@ -568,6 +573,69 @@ static inline bool tee_param_is_memref(struct tee_param *param)
 	default:
 		return false;
 	}
+}
+
+static inline bool tee_ioctl_param_is_ocall_reply(struct tee_ioctl_param *param)
+{
+	u64 type = param->attr & TEE_IOCTL_PARAM_ATTR_TYPE_MASK;
+
+	return param->attr & TEE_IOCTL_PARAM_ATTR_OCALL &&
+	       type == TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INOUT &&
+	       param->a != 0;
+}
+
+static inline bool tee_param_is_ocall_request(struct tee_param *param)
+{
+	u64 type = param->attr & TEE_IOCTL_PARAM_ATTR_TYPE_MASK;
+
+	return param->attr & TEE_IOCTL_PARAM_ATTR_OCALL &&
+	       type == TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INOUT &&
+	       param->u.value.a != 0;
+}
+
+static inline bool tee_param_is_ocall_request_safe(struct tee_param *param)
+{
+	return param ? tee_param_is_ocall_request(param) : false;
+}
+
+static inline bool tee_param_is_ocall(struct tee_param *param)
+{
+	u64 type = param->attr & TEE_IOCTL_PARAM_ATTR_TYPE_MASK;
+
+	return param->attr & TEE_IOCTL_PARAM_ATTR_OCALL &&
+	       type == TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INOUT;
+}
+
+static inline void tee_param_clear_ocall(struct tee_param *ocall)
+{
+	memset(&ocall->u, 0, sizeof(ocall->u));
+}
+
+static inline struct tee_param *
+tee_param_find_ocall(struct tee_param *params, u32 num_params)
+{
+	size_t n;
+
+	for (n = 0; n < num_params; n++) {
+		if (tee_param_is_ocall(params + n)) {
+			if (n == 0)
+				return params + n;
+			else
+				return ERR_PTR(-EINVAL);
+		}
+	}
+
+	return NULL;
+}
+
+static inline int tee_param_get_ocall_id(struct tee_param *param)
+{
+	return TEE_IOCTL_OCALL_GET_ID(param->u.value.a);
+}
+
+static inline int tee_param_get_ocall_func(struct tee_param *param)
+{
+	return TEE_IOCTL_OCALL_GET_FUNC(param->u.value.a);
 }
 
 extern struct bus_type tee_bus_type;

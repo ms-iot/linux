@@ -17,11 +17,14 @@
 /* Some Global Platform error codes used in this driver */
 #define TEEC_SUCCESS			0x00000000
 #define TEEC_ERROR_BAD_PARAMETERS	0xFFFF0006
+#define TEEC_ERROR_NOT_SUPPORTED	0xFFFF000A
 #define TEEC_ERROR_COMMUNICATION	0xFFFF000E
 #define TEEC_ERROR_OUT_OF_MEMORY	0xFFFF000C
 #define TEEC_ERROR_SHORT_BUFFER		0xFFFF0010
+#define TEEC_ERROR_TARGET_DEAD		0xFFFF3024
 
 #define TEEC_ORIGIN_COMMS		0x00000002
+#define TEEC_ORIGIN_CLIENT_APP		0x00000005
 
 typedef void (optee_invoke_fn)(unsigned long, unsigned long, unsigned long,
 				unsigned long, unsigned long, unsigned long,
@@ -93,6 +96,7 @@ struct optee {
 
 struct optee_session {
 	struct list_head list_node;
+	struct tee_context *ctx;
 	u32 session_id;
 };
 
@@ -100,6 +104,7 @@ struct optee_context_data {
 	/* Serializes access to this struct */
 	struct mutex mutex;
 	struct list_head sess_list;
+	struct idr ocalls;
 };
 
 struct optee_rpc_param {
@@ -118,19 +123,135 @@ struct optee_call_waiter {
 	struct completion c;
 };
 
-/* Holds context that is preserved during one STD call */
+struct optee_call_ctx;
+typedef void (*optee_ocall_cancel_callback_t)(struct optee_call_ctx *call_ctx);
+
+/**
+ * struct optee_call_ctx - holds context that is preserved during one STD call
+ * @pages_list:		list of pages allocated for RPC requests
+ * @num_entries:	numbers of pages in 'pages_list'
+ * @id:			OCALL Id
+ * @session:		session Id whence the OCALL originated, if any
+ * @ctx:		TEE context whence the OCALL originated, if any
+ * @cancel_cb:		callback function run after the OCALL is cancelled
+ * @msg_shm:		shared memory object used for calling into OP-TEE
+ * @msg_arg:		arguments used for calling into OP-TEE, namely the data
+ *			behind 'msg_shm'
+ * @msg_parg:		physical pointer underlying 'msg_shm'
+ * @list_shm:		list of shared memory objects used by an OCALL to which
+ *			a reference is kept by the driver until the OCALL is
+ *			complete or cancelled, effectively preventing the CA
+ *			from releasing the SHM while an OCALL request or reply
+ *			is being processed
+ * @attached:		set if the calling context was added to the list of
+ *			OCALLS in the TEE context; used to guard against double
+ *			removals due to concurrency
+ * @releasing:		guards 'ref' against double-frees
+ * @ref:		provides reference counting and protects the entire
+ *			structure from being released before all threads are
+ *			done with it
+ * @mutex:		protects every element listed below this one
+ * @pending:		set if a secure thread is blocked pending an OCALL reply
+ *			and is used to decide whether upon cancellation, a call
+ *			into OP-TEE is necessary
+ * @cancelled:		set if the OCALL was cancelled, guarding against
+ *			double-cancellations due to concurrency
+ * @cancel_code:	if not U32_MAX, indicates OCALL return code when
+ *			cancelled; otherwise, the return code set in rpc_arg is
+ *			used as-is
+ * @rpc_shm:		shared memory object used for responding to RPCs
+ * @rpc_arg:		arguments used for responding to RPCs, namely the data
+ *			behind 'rpc_shm'
+ * @thread_id:		secure thread Id whence the OCALL originated and which
+ *			must be resumed when replying to the OCALL
+ * @enqueued:		set if 'waiter' was added to the calling queue and must
+ *			be removed after the OCALL is replied to or cancelled,
+ *			including freeing `pages_list`, if necessary
+ * @waiter:		object used to wait until a secure thread becomes
+ *			available is the previous call into OP-TEE failed
+ *			because all secure threads are in use
+ */
 struct optee_call_ctx {
-	/* information about pages list used in last allocation */
+	/* Information about pages list used in last allocation */
 	void *pages_list;
 	size_t num_entries;
+
+	/*
+	 * Begin: OCALL support
+	 */
+
+	/* Unprotected, no concurrent usage code paths */
+	int id;
+	u32 session;
+	struct tee_context *ctx;
+	optee_ocall_cancel_callback_t cancel_cb;
+
+	struct tee_shm *msg_shm;
+	struct optee_msg_arg *msg_arg;
+	phys_addr_t msg_parg;
+
+	struct list_head list_shm;
+
+	/* Guards against double detachment from TEE context */
+	atomic_t attached;
+
+	/* Guards ref */
+	atomic_t releasing;
+	struct kref ref;
+
+	/* Serializes access to the elements below */
+	struct mutex mutex;
+
+	bool pending;
+	bool cancelled;
+	u32 cancel_code;
+
+	struct tee_shm *rpc_shm;
+	struct optee_msg_arg *rpc_arg;
+
+	u32 thread_id;
+	bool enqueued;
+	struct optee_call_waiter waiter;
+
+	/*
+	 * End: OCALL support
+	 */
 };
+
+/*
+ * RPC support
+ */
 
 void optee_handle_rpc(struct tee_context *ctx, struct optee_rpc_param *param,
 		      struct optee_call_ctx *call_ctx);
+bool optee_rpc_is_ocall(struct optee_rpc_param *param,
+			struct optee_call_ctx *call_ctx);
+int optee_rpc_process_shm_alloc(struct tee_shm *shm,
+				struct optee_msg_param *msg_param, void **list);
 void optee_rpc_finalize_call(struct optee_call_ctx *call_ctx);
+
+/*
+ * Wait queue
+ */
 
 void optee_wait_queue_init(struct optee_wait_queue *wq);
 void optee_wait_queue_exit(struct optee_wait_queue *wq);
+
+/*
+ * Call queue
+ */
+
+void optee_cq_wait_init(struct optee_call_queue *cq,
+			struct optee_call_waiter *w);
+void optee_cq_wait_for_completion(struct optee_call_queue *cq,
+				  struct optee_call_waiter *w);
+void optee_cq_complete_one(struct optee_call_queue *cq);
+void optee_cq_wait_final(struct optee_call_queue *cq,
+			 struct optee_call_waiter *w);
+
+/*
+ * Supplicant
+ */
 
 u32 optee_supp_thrd_req(struct tee_context *ctx, u32 func, size_t num_params,
 			struct tee_param *param);
@@ -146,14 +267,42 @@ int optee_supp_recv(struct tee_context *ctx, u32 *func, u32 *num_params,
 int optee_supp_send(struct tee_context *ctx, u32 ret, u32 num_params,
 		    struct tee_param *param);
 
+/*
+ * Calls into OP-TEE
+ */
+
 u32 optee_do_call_with_arg(struct tee_context *ctx, phys_addr_t parg);
+u32 optee_do_call_with_ctx(struct optee_call_ctx *call_ctx);
+
+struct tee_shm *optee_get_msg_arg(struct tee_context *ctx, size_t num_params,
+				  struct optee_msg_arg **msg_arg,
+				  phys_addr_t *msg_parg);
+
+/*
+ * Sessions
+ */
+
 int optee_open_session(struct tee_context *ctx,
 		       struct tee_ioctl_open_session_arg *arg,
 		       struct tee_param *param);
 int optee_close_session(struct tee_context *ctx, u32 session);
+
+/*
+ * Function invocations
+ */
+
 int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 		      struct tee_param *param);
+
+/*
+ * Cancellations
+ */
+
 int optee_cancel_req(struct tee_context *ctx, u32 cancel_id, u32 session);
+
+/*
+ * Shared memory
+ */
 
 void optee_enable_shm_cache(struct optee *optee);
 void optee_disable_shm_cache(struct optee *optee);
@@ -168,25 +317,62 @@ int optee_shm_register_supp(struct tee_context *ctx, struct tee_shm *shm,
 			    unsigned long start);
 int optee_shm_unregister_supp(struct tee_context *ctx, struct tee_shm *shm);
 
+/*
+ * Paremeters
+ */
+
 int optee_from_msg_param(struct tee_param *params, size_t num_params,
 			 const struct optee_msg_param *msg_params);
 int optee_to_msg_param(struct optee_msg_param *msg_params, size_t num_params,
 		       const struct tee_param *params);
+
+/*
+ * RPC memory
+ */
 
 u64 *optee_allocate_pages_list(size_t num_entries);
 void optee_free_pages_list(void *array, size_t num_entries);
 void optee_fill_pages_list(u64 *dst, struct page **pages, int num_pages,
 			   size_t page_offset);
 
+/*
+ * Devices
+ */
+
 int optee_enumerate_devices(void);
 
-void optee_cq_wait_init(struct optee_call_queue *cq,
-			struct optee_call_waiter *w);
-void optee_cq_wait_for_completion(struct optee_call_queue *cq,
-				  struct optee_call_waiter *w);
-void optee_cq_complete_one(struct optee_call_queue *cq);
-void optee_cq_wait_final(struct optee_call_queue *cq,
-			 struct optee_call_waiter *w);
+/*
+ * OCALLs
+ */
+
+struct optee_call_ctx *
+optee_ocall_ctx_alloc(struct tee_context *ctx, u32 num_params,
+		      optee_ocall_cancel_callback_t cancel_cb);
+struct optee_call_ctx *optee_ocall_ctx_get_from_id(struct tee_context *ctx,
+						   int id);
+void optee_ocall_ctx_get(struct optee_call_ctx *call_ctx);
+void optee_ocall_ctx_put(struct optee_call_ctx *call_ctx);
+
+int optee_ocall_register(struct optee_call_ctx *call_ctx);
+void optee_ocall_deregister(struct optee_call_ctx *call_ctx);
+
+void optee_ocall_prologue(struct optee_call_ctx *call_ctx);
+void optee_ocall_epilogue(struct optee_call_ctx *call_ctx);
+
+void optee_ocall_cancel(struct optee_call_ctx *call_ctx);
+void optee_ocall_cancel_with_code(struct optee_call_ctx *call_ctx, u32 code);
+
+void optee_ocall_notify_session_close(struct optee_session *session);
+void optee_ocall_notify_context_release(struct tee_context *ctx);
+
+int optee_ocall_process_request(struct tee_ioctl_invoke_arg *arg,
+				struct tee_param *params, u32 num_params,
+				struct tee_param *ocall,
+				struct optee_call_ctx *call_ctx);
+int optee_ocall_process_reply(struct tee_ioctl_invoke_arg *arg,
+			      struct tee_param *params, u32 num_params,
+			      struct tee_param *ocall,
+			      struct optee_call_ctx *call_ctx);
 
 /*
  * Small helpers
