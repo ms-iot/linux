@@ -45,6 +45,7 @@
 /* Flags relating to shared memory */
 #define TEE_IOCTL_SHM_MAPPED	BIT(0)/* memory mapped in normal world */
 #define TEE_IOCTL_SHM_DMA_BUF	BIT(1)/* dma-buf handle on shared memory */
+#define TEE_IOCTL_SHM_OCALL	BIT(2)/* memory used for an OCALL */
 
 #define TEE_MAX_ARG_SIZE	1024
 
