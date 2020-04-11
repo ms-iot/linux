@@ -320,18 +320,20 @@ tee_ioctl_shm_register(struct tee_context *ctx,
 		       struct tee_ioctl_shm_register_data __user *udata)
 {
 	long ret;
+	u32 flags = TEE_SHM_DMA_BUF | TEE_SHM_USER_MAPPED;
 	struct tee_ioctl_shm_register_data data;
 	struct tee_shm *shm;
 
 	if (copy_from_user(&data, udata, sizeof(data)))
 		return -EFAULT;
 
-	/* Currently no input flags are supported */
-	if (data.flags)
+	if (data.flags & ~TEE_IOCTL_SHM_OCALL)
 		return -EINVAL;
 
-	shm = tee_shm_register(ctx, data.addr, data.length,
-			       TEE_SHM_DMA_BUF | TEE_SHM_USER_MAPPED);
+	if (data.flags & TEE_IOCTL_SHM_OCALL)
+		flags |= TEE_SHM_OCALL;
+
+	shm = tee_shm_register(ctx, data.addr, data.length, flags);
 	if (IS_ERR(shm))
 		return PTR_ERR(shm);
 
