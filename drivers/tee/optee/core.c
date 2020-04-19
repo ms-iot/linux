@@ -250,7 +250,6 @@ static int optee_open(struct tee_context *ctx)
 
 	mutex_init(&ctxdata->mutex);
 	INIT_LIST_HEAD(&ctxdata->sess_list);
-	idr_init(&ctxdata->ocalls);
 
 	if (optee->sec_caps & OPTEE_SMC_SEC_CAP_MEMREF_NULL)
 		ctx->cap_memref_null = true;

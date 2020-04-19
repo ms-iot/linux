@@ -59,44 +59,6 @@ static void handle_invoke_func_cancel(struct optee_call_ctx *call_ctx)
 	}
 }
 
-static int optee_invoke_func_fast(struct tee_context *ctx,
-				  struct tee_ioctl_invoke_arg *arg,
-				  struct tee_param *param)
-{
-	struct tee_shm *shm;
-	struct optee_msg_arg *msg_arg;
-	phys_addr_t msg_parg;
-	int rc;
-
-	shm = optee_get_msg_arg(ctx, arg->num_params, &msg_arg, &msg_parg);
-	if (IS_ERR(shm))
-		return PTR_ERR(shm);
-	msg_arg->cmd = OPTEE_MSG_CMD_INVOKE_COMMAND;
-	msg_arg->func = arg->func;
-	msg_arg->session = arg->session;
-	msg_arg->cancel_id = arg->cancel_id;
-
-	rc = optee_to_msg_param(msg_arg->params, arg->num_params, param);
-	if (rc)
-		goto out;
-
-	if (optee_do_call_with_arg(ctx, msg_parg)) {
-		msg_arg->ret = TEEC_ERROR_COMMUNICATION;
-		msg_arg->ret_origin = TEEC_ORIGIN_COMMS;
-	}
-
-	if (optee_from_msg_param(param, arg->num_params, msg_arg->params)) {
-		msg_arg->ret = TEEC_ERROR_COMMUNICATION;
-		msg_arg->ret_origin = TEEC_ORIGIN_COMMS;
-	}
-
-	arg->ret = msg_arg->ret;
-	arg->ret_origin = msg_arg->ret_origin;
-out:
-	tee_shm_free(shm);
-	return rc;
-}
-
 /**
  * optee_do_call_with_ctx() - Do an SMC to OP-TEE in secure world
  * @ctx:	calling context
@@ -104,12 +66,8 @@ out:
  * Does and SMC to OP-TEE in secure world and handles eventual resulting
  * Remote Procedure Calls (RPC) from OP-TEE.
  *
- * Returns return code from secure world, 0 is OK, -EAGAIN is OCALL, -EINTR
- * means that the calling context for the currently active OCALL was marked as
- * cancelled by another thread (i.e., a multithreaded CA crashed on a thread
- * other than the one that originally resulted in an OCALL request and objects
- * are being released, including the TEE context, which cancels outstanding
- * OCALLs.)
+ * Returns return code from secure world, 0 is OK, -EAGAIN means an OCALL
+ * request was received.
  */
 u32 optee_do_call_with_ctx(struct optee_call_ctx *call_ctx)
 {
@@ -118,11 +76,6 @@ u32 optee_do_call_with_ctx(struct optee_call_ctx *call_ctx)
 	u32 ret;
 
 	if (call_ctx->rpc_shm) {
-		if (call_ctx->cancelled) {
-			call_ctx->pending = false;
-			return -EINTR;
-		}
-
 		param.a0 = OPTEE_SMC_CALL_RETURN_FROM_RPC;
 		reg_pair_from_64(&param.a1, &param.a2,
 				 (uintptr_t)call_ctx->rpc_shm);
@@ -157,7 +110,6 @@ u32 optee_do_call_with_ctx(struct optee_call_ctx *call_ctx)
 			param.a3 = res.a3;
 
 			if (optee_rpc_is_ocall(&param, call_ctx)) {
-				call_ctx->pending = true;
 				return -EAGAIN;
 			}
 
@@ -165,8 +117,6 @@ u32 optee_do_call_with_ctx(struct optee_call_ctx *call_ctx)
 			optee_handle_rpc(call_ctx->ctx, &param, call_ctx);
 		} else {
 			ret = res.a0;
-			if (call_ctx->rpc_shm && ret == OPTEE_SMC_RETURN_OK)
-				call_ctx->pending = false;
 			break;
 		}
 	}
@@ -198,9 +148,7 @@ u32 optee_do_call_with_arg(struct tee_context *ctx, phys_addr_t parg)
 
 	rc = optee_do_call_with_ctx(&call_ctx);
 
-	if (rc == -EINTR) {
-		pr_warn("call cancellation was unexpected");
-	} else if (rc == -EAGAIN) {
+	if (rc == -EAGAIN) {
 		pr_warn("received an unexpected OCALL, cancelling it now");
 		call_ctx.rpc_arg->ret = TEEC_ERROR_NOT_SUPPORTED;
 		call_ctx.rpc_arg->ret_origin = TEEC_ORIGIN_COMMS;
@@ -218,9 +166,9 @@ u32 optee_do_call_with_arg(struct tee_context *ctx, phys_addr_t parg)
 	return rc;
 }
 
-struct tee_shm *optee_get_msg_arg(struct tee_context *ctx, size_t num_params,
-				  struct optee_msg_arg **msg_arg,
-				  phys_addr_t *msg_parg)
+static struct tee_shm *get_msg_arg(struct tee_context *ctx, size_t num_params,
+				   struct optee_msg_arg **msg_arg,
+				   phys_addr_t *msg_parg)
 {
 	int rc;
 	struct tee_shm *shm;
@@ -265,7 +213,7 @@ int optee_open_session(struct tee_context *ctx,
 	struct optee_session *sess = NULL;
 
 	/* +2 for the meta parameters added below */
-	shm = optee_get_msg_arg(ctx, arg->num_params + 2, &msg_arg, &msg_parg);
+	shm = get_msg_arg(ctx, arg->num_params + 2, &msg_arg, &msg_parg);
 	if (IS_ERR(shm))
 		return PTR_ERR(shm);
 
@@ -304,8 +252,9 @@ int optee_open_session(struct tee_context *ctx,
 		 * A new session has been created, initialize OCALL support, and
 		 * add the session to the list.
 		 */
-		sess->ctx = ctx;
 		sess->session_id = msg_arg->session;
+		sema_init(&sess->sem, 1);
+		INIT_LIST_HEAD(&sess->call_ctx.list_shm);
 		mutex_lock(&ctxdata->mutex);
 		list_add(&sess->list_node, &ctxdata->sess_list);
 		mutex_unlock(&ctxdata->mutex);
@@ -340,8 +289,10 @@ int optee_close_session(struct tee_context *ctx, u32 session)
 	/* Check that the session is valid and remove it from the list */
 	mutex_lock(&ctxdata->mutex);
 	sess = find_session(ctxdata, session);
-	if (sess)
+	if (sess) {
 		list_del(&sess->list_node);
+		down(&sess->sem);
+	}
 	mutex_unlock(&ctxdata->mutex);
 	if (!sess)
 		return -EINVAL;
@@ -351,7 +302,7 @@ int optee_close_session(struct tee_context *ctx, u32 session)
 
 	kfree(sess);
 
-	shm = optee_get_msg_arg(ctx, 0, &msg_arg, &msg_parg);
+	shm = get_msg_arg(ctx, 0, &msg_arg, &msg_parg);
 	if (IS_ERR(shm))
 		return PTR_ERR(shm);
 
@@ -370,7 +321,7 @@ int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 	struct optee_call_ctx *call_ctx;
 	struct optee_session *sess;
 	struct tee_param *ocall;
-	int ocall_id;
+	u64 ocall_func;
 	int rc = 0;
 
 	u32 act_num_params;
@@ -379,59 +330,61 @@ int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 	/* Check that the session is valid */
 	mutex_lock(&ctxdata->mutex);
 	sess = find_session(ctxdata, arg->session);
+	if (sess)
+		down(&sess->sem);
 	mutex_unlock(&ctxdata->mutex);
 	if (!sess)
 		return -EINVAL;
 
 	ocall = tee_param_find_ocall(param, arg->num_params);
-	if (IS_ERR(ocall))
-		return PTR_ERR(ocall);
+	if (IS_ERR(ocall)) {
+		rc = PTR_ERR(ocall);
+		goto exit;
+	}
+
+	if (ocall && !ctx->cap_ocall) {
+		rc = -ENOTSUPP;
+		goto exit;
+	}
 
 	act_num_params = arg->num_params - (ocall ? 1 : 0);
 	act_params = param + (ocall ? 1 : 0);
 
-	/*
-	 * If OCALL requests are not expected, forgo the overhead of allocating
-	 * a full calling context and its associated elements.
-	 */
-	if (!ocall)
-		return optee_invoke_func_fast(ctx, arg, param);
+	call_ctx = &sess->call_ctx;
+	ocall_func = ocall ? tee_param_get_ocall_func(ocall) : 0;
+	if (ocall_func) {
+		/* The current call is a reply to an OCALL request */
 
-	if (!ctx->cap_ocall)
-		return -ENOTSUPP;
-
-	ocall_id = tee_param_get_ocall_id(ocall);
-	if (ocall_id) {
-		/*
-		 * The current call is a reply to an OCALL request.
-		 */
-
-		call_ctx = optee_ocall_ctx_get_from_id(ctx, ocall_id);
-		if (IS_ERR(call_ctx))
-			return PTR_ERR(call_ctx);
+		if (!call_ctx->rpc_shm) {
+			rc = -EINVAL;
+			goto exit;
+		}
 
 		rc = optee_ocall_process_reply(arg, act_params, act_num_params,
 					       ocall, call_ctx);
 		if (rc)
-			goto exit;
+			goto exit_with_cancel;
 	} else {
 		/*
-		 * The current call is a regular function invocation that may
-		 * result in an OCALL request.
+		 * The current call is an invocation that may result in an OCALL
+		 * request.
 		 */
 
-		call_ctx = optee_ocall_ctx_alloc(ctx, act_num_params,
-						 handle_invoke_func_cancel);
-		if (IS_ERR(call_ctx))
-			return PTR_ERR(call_ctx);
-
-		rc = optee_ocall_register(call_ctx);
-		if (rc) {
-			optee_ocall_ctx_put(call_ctx);
-			return rc;
+		if (call_ctx->rpc_shm) {
+			rc = -EINVAL;
+			goto exit;
 		}
 
-		call_ctx->session = arg->session;
+		call_ctx->msg_shm = get_msg_arg(ctx, act_num_params,
+						&call_ctx->msg_arg,
+						&call_ctx->msg_parg);
+		if (IS_ERR(call_ctx->msg_shm)) {
+			rc = PTR_ERR(call_ctx->msg_shm);
+			goto exit;
+		}
+
+		call_ctx->ctx = ctx;
+		call_ctx->cancel_cb = handle_invoke_func_cancel;
 		call_ctx->msg_arg->cmd = OPTEE_MSG_CMD_INVOKE_COMMAND;
 		call_ctx->msg_arg->func = arg->func;
 		call_ctx->msg_arg->session = arg->session;
@@ -439,35 +392,21 @@ int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 
 		rc = optee_to_msg_param(call_ctx->msg_arg->params,
 					act_num_params, act_params);
-		if (rc) {
-			optee_ocall_deregister(call_ctx);
-			optee_ocall_ctx_put(call_ctx);
-			return rc;
-		}
+		if (rc)
+			goto exit_with_clear;
 
-		mutex_lock(&call_ctx->mutex);
 		optee_ocall_prologue(call_ctx);
-		mutex_unlock(&call_ctx->mutex);
 	}
 
-	mutex_lock(&call_ctx->mutex);
 	rc = optee_do_call_with_ctx(call_ctx);
-	mutex_unlock(&call_ctx->mutex);
-
 	if (rc == -EAGAIN) {
 		rc = optee_ocall_process_request(arg, act_params,
 						 act_num_params, ocall,
 						 call_ctx);
 		if (rc)
-			goto exit;
-
-		optee_ocall_ctx_put(call_ctx);
+			goto exit_with_cancel;
 	} else {
-		mutex_lock(&call_ctx->mutex);
 		optee_ocall_epilogue(call_ctx);
-		mutex_unlock(&call_ctx->mutex);
-
-		optee_ocall_deregister(call_ctx);
 
 		arg->ret = call_ctx->msg_arg->ret;
 		arg->ret_origin = call_ctx->msg_arg->ret_origin;
@@ -483,24 +422,24 @@ int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 			arg->ret_origin = TEEC_ORIGIN_COMMS;
 		}
 
-		optee_ocall_ctx_put(call_ctx);
-		tee_param_clear_ocall(ocall);
+		tee_shm_free(call_ctx->msg_shm);
+		memset(call_ctx, 0, sizeof(*call_ctx));
+		tee_param_clear_ocall_safe(ocall);
 	}
+
+	up(&sess->sem);
 	return rc;
 
-exit:
+exit_with_cancel:
 	optee_from_msg_param(act_params, act_num_params,
 			     call_ctx->msg_arg->params);
-
-	call_ctx->cancel_cb = NULL;
-
-	mutex_lock(&call_ctx->mutex);
 	optee_ocall_cancel(call_ctx);
-	mutex_unlock(&call_ctx->mutex);
-
-	optee_ocall_deregister(call_ctx);
-	optee_ocall_ctx_put(call_ctx);
-	tee_param_clear_ocall(ocall);
+exit_with_clear:
+	tee_shm_free(call_ctx->msg_shm);
+	memset(call_ctx, 0, sizeof(*call_ctx));
+	tee_param_clear_ocall_safe(ocall);
+exit:
+	up(&sess->sem);
 	return rc;
 }
 
@@ -519,7 +458,7 @@ int optee_cancel_req(struct tee_context *ctx, u32 cancel_id, u32 session)
 	if (!sess)
 		return -EINVAL;
 
-	shm = optee_get_msg_arg(ctx, 0, &msg_arg, &msg_parg);
+	shm = get_msg_arg(ctx, 0, &msg_arg, &msg_parg);
 	if (IS_ERR(shm))
 		return PTR_ERR(shm);
 
@@ -741,7 +680,7 @@ int optee_shm_register(struct tee_context *ctx, struct tee_shm *shm,
 	if (!pages_list)
 		return -ENOMEM;
 
-	shm_arg = optee_get_msg_arg(ctx, 1, &msg_arg, &msg_parg);
+	shm_arg = get_msg_arg(ctx, 1, &msg_arg, &msg_parg);
 	if (IS_ERR(shm_arg)) {
 		rc = PTR_ERR(shm_arg);
 		goto out;
@@ -779,7 +718,7 @@ int optee_shm_unregister(struct tee_context *ctx, struct tee_shm *shm)
 	phys_addr_t msg_parg;
 	int rc = 0;
 
-	shm_arg = optee_get_msg_arg(ctx, 1, &msg_arg, &msg_parg);
+	shm_arg = get_msg_arg(ctx, 1, &msg_arg, &msg_parg);
 	if (IS_ERR(shm_arg))
 		return PTR_ERR(shm_arg);
 

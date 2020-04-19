@@ -178,7 +178,6 @@ void tee_device_unregister(struct tee_device *teedev);
  * @teedev:	device used to allocate the object
  * @ctx:	context using the object, if NULL the context is gone
  * @link:	link element
- * @ocall_link:	link element for when the SHM is used during an OCALL request
  * @paddr:	physical address of the shared memory
  * @kaddr:	virtual address of the shared memory
  * @size:	size of shared memory
@@ -611,6 +610,12 @@ static inline void tee_param_clear_ocall(struct tee_param *ocall)
 	memset(&ocall->u, 0, sizeof(ocall->u));
 }
 
+static inline void tee_param_clear_ocall_safe(struct tee_param *ocall)
+{
+	if (ocall)
+		tee_param_clear_ocall(ocall);
+}
+
 static inline struct tee_param *
 tee_param_find_ocall(struct tee_param *params, u32 num_params)
 {
@@ -628,14 +633,9 @@ tee_param_find_ocall(struct tee_param *params, u32 num_params)
 	return NULL;
 }
 
-static inline int tee_param_get_ocall_id(struct tee_param *param)
+static inline u64 tee_param_get_ocall_func(struct tee_param *param)
 {
-	return TEE_IOCTL_OCALL_GET_ID(param->u.value.a);
-}
-
-static inline int tee_param_get_ocall_func(struct tee_param *param)
-{
-	return TEE_IOCTL_OCALL_GET_FUNC(param->u.value.a);
+	return param->u.value.a;
 }
 
 extern struct bus_type tee_bus_type;

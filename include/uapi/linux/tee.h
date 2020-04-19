@@ -283,24 +283,6 @@ struct tee_ioctl_open_session_arg {
 #define TEE_IOC_OPEN_SESSION	_IOR(TEE_IOC_MAGIC, TEE_IOC_BASE + 2, \
 				     struct tee_ioctl_buf_data)
 
-/**
- * TEE_IOCTL_OCALL_GET_ID - Decode the OCALL ID from the OCALL meta parameter
- * OCALL ID and OCALL Function pair
- */
-#define TEE_IOCTL_OCALL_GET_ID(x)		((__u32)((x) >> 32))
-
-/**
- * TEE_IOCTL_OCALL_GET_FUNC - Decode the OCALL Function from the OCALL meta
- * parameter OCALL ID and OCALL Function pair
- */
-#define TEE_IOCTL_OCALL_GET_FUNC(x)		((__u32)(x))
-
-/**
- * TEE_IOCTL_OCALL_MAKE_PAIR - Encode an OCALL Function and an OCALL ID into an
- * encoded pair
- */
-#define TEE_IOCTL_OCALL_MAKE_PAIR(func, id)	((((__u64)(id)) << 32) | (func))
-
 /*
  * Command sent to the CA to request allocation of shared memory to carry the
  * parameters of an OCALL
