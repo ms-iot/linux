@@ -31,32 +31,9 @@ static struct optee_session *find_session(struct optee_context_data *ctxdata,
 /* Called when an OCALL that originated from optee_invoke_func is cancelled */
 static void handle_invoke_func_cancel(struct optee_call_ctx *call_ctx)
 {
-	size_t n;
-
-	for (n = 0; n < call_ctx->msg_arg->num_params; n++) {
-		struct tee_shm *shm;
-		struct optee_msg_param *mp = call_ctx->msg_arg->params + n;
-		u32 attr = mp->attr & OPTEE_MSG_ATTR_TYPE_MASK;
-
-		switch (attr) {
-		case OPTEE_MSG_ATTR_TYPE_TMEM_INPUT:
-		case OPTEE_MSG_ATTR_TYPE_TMEM_OUTPUT:
-		case OPTEE_MSG_ATTR_TYPE_TMEM_INOUT:
-			shm = (struct tee_shm *)(uintptr_t)mp->u.tmem.shm_ref;
-			break;
-		case OPTEE_MSG_ATTR_TYPE_RMEM_INPUT:
-		case OPTEE_MSG_ATTR_TYPE_RMEM_OUTPUT:
-		case OPTEE_MSG_ATTR_TYPE_RMEM_INOUT:
-			shm = (struct tee_shm *)(uintptr_t)mp->u.rmem.shm_ref;
-			break;
-		default:
-			shm = NULL;
-			break;
-		}
-
-		if (shm)
-			tee_shm_put(shm);
-	}
+	optee_ocall_process_memrefs(call_ctx->msg_arg->params,
+				    call_ctx->msg_arg->num_params,
+				    false);
 }
 
 /**
@@ -248,13 +225,9 @@ int optee_open_session(struct tee_context *ctx,
 	}
 
 	if (msg_arg->ret == TEEC_SUCCESS) {
-		/*
-		 * A new session has been created, initialize OCALL support, and
-		 * add the session to the list.
-		 */
+		/* A new session has been created, add it to the list. */
 		sess->session_id = msg_arg->session;
 		sema_init(&sess->sem, 1);
-		INIT_LIST_HEAD(&sess->call_ctx.list_shm);
 		mutex_lock(&ctxdata->mutex);
 		list_add(&sess->list_node, &ctxdata->sess_list);
 		mutex_unlock(&ctxdata->mutex);
@@ -297,9 +270,7 @@ int optee_close_session(struct tee_context *ctx, u32 session)
 	if (!sess)
 		return -EINVAL;
 
-	/* Let the OCALLs system know that this session is about to go away */
 	optee_ocall_notify_session_close(sess);
-
 	kfree(sess);
 
 	shm = get_msg_arg(ctx, 0, &msg_arg, &msg_parg);

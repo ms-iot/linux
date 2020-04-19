@@ -317,7 +317,6 @@ static void optee_release(struct tee_context *ctx)
 
 static void optee_pre_release(struct tee_context *ctx)
 {
-	/* Let the OCALLs system that this context is going bye-bye */
 	optee_ocall_notify_context_release(ctx);
 }
 

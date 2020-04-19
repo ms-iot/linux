@@ -2,12 +2,9 @@
 /*
  * Copyright (c) 2020, Microsoft Corporation
  *
- * The object used to hold OCALL context is struct optee_call_ctx, which lives
- * inside struct optee_session. The latter carries a binary semaphore. All
- * functions in this file, unless otherwise noted, assume that their caller
- * holds the semaphore for the given session when the functions take a session
- * as a parameter, or for the given calling context's parent session when the
- * functions take a pointer to the embedded calling context.
+ * All functions in this file, unless noted otherwise, assume that the session
+ * binary semaphore corresponding to the calling context being operated on is
+ * held (i.e., with down(&sess->sem)).
  */
 
 #include <linux/err.h>
@@ -17,55 +14,39 @@
 #include <linux/types.h>
 #include "optee_private.h"
 
-static void optee_ocall_inc_memrefs_refcount(struct tee_param *params,
-					     u32 num_params,
-					     struct optee_call_ctx *call_ctx)
+void optee_ocall_process_memrefs(struct optee_msg_param *params, u32 num_params,
+				 bool increment)
 {
 	size_t n;
 
 	for (n = 0; n < num_params; n++) {
 		struct tee_shm *shm;
-		struct tee_param *p = params + n;
+		struct optee_msg_param *mp = params + n;
+		u32 attr = mp->attr & OPTEE_MSG_ATTR_TYPE_MASK;
 
-		if (!tee_param_is_memref(p))
+		switch (attr) {
+		case OPTEE_MSG_ATTR_TYPE_TMEM_INPUT:
+		case OPTEE_MSG_ATTR_TYPE_TMEM_OUTPUT:
+		case OPTEE_MSG_ATTR_TYPE_TMEM_INOUT:
+			shm = (struct tee_shm *)(uintptr_t)mp->u.tmem.shm_ref;
+			break;
+		case OPTEE_MSG_ATTR_TYPE_RMEM_INPUT:
+		case OPTEE_MSG_ATTR_TYPE_RMEM_OUTPUT:
+		case OPTEE_MSG_ATTR_TYPE_RMEM_INOUT:
+			shm = (struct tee_shm *)(uintptr_t)mp->u.rmem.shm_ref;
+			break;
+		default:
+			shm = NULL;
+			break;
+		}
+
+		if (!shm)
 			continue;
 
-		shm = p->u.memref.shm;
-		if (!shm->ocall_link.next) {
-			list_add(&p->u.memref.shm->ocall_link,
-				 &call_ctx->list_shm);
-			tee_shm_get(p->u.memref.shm);
-		}
-	}
-}
-
-static void optee_ocall_dec_memrefs_refcount(struct tee_param *params,
-					     u32 num_params,
-					     struct optee_call_ctx *call_ctx)
-{
-	size_t n;
-
-	for (n = 0; n < num_params; n++) {
-		struct tee_shm *shm;
-		struct tee_param *p = params + n;
-
-		if (!tee_param_is_memref(p))
-			continue;
-
-		shm = p->u.memref.shm;
-		if (shm->ocall_link.next) {
-			tee_shm_put(p->u.memref.shm);
-			list_del(&p->u.memref.shm->ocall_link);
-
-			/*
-			 * Set the list entry to NULL to avoid depending on
-			 * internal poison values being kept as-is in the
-			 * future. Note that this prevents the list debug
-			 * mechanism (CONFIG_DEBUG_LIST=y) from doing its job.
-			 */
-			memset(&p->u.memref.shm->ocall_link, 0,
-			       sizeof(p->u.memref.shm->ocall_link));
-		}
+		if (increment)
+			tee_shm_get(shm);
+		else
+			tee_shm_put(shm);
 	}
 }
 
@@ -87,20 +68,26 @@ void optee_ocall_epilogue(struct optee_call_ctx *call_ctx)
 void optee_ocall_cancel(struct optee_call_ctx *call_ctx)
 {
 	int rc;
-	struct tee_shm *shm;
+
+	/* +2 and -2 to skip the OCALL descriptors */
+	if (call_ctx->rpc_must_release)
+		optee_ocall_process_memrefs(call_ctx->rpc_arg->params + 2,
+					    call_ctx->rpc_arg->num_params - 2,
+					    false);
 
 	rc = optee_do_call_with_ctx(call_ctx);
 	if (rc == -EAGAIN)
 		pr_warn("received an OCALL while cancelling an OCALL");
 
-	tee_shm_free(call_ctx->msg_shm);
-
-	list_for_each_entry(shm, &call_ctx->list_shm, ocall_link)
-		tee_shm_put(shm);
-	optee_ocall_epilogue(call_ctx);
-
 	if (call_ctx->cancel_cb)
 		call_ctx->cancel_cb(call_ctx);
+
+	/*
+	 * Delay destroying things until after the cancel callback since the
+	 * latter may use them.
+	 */
+	tee_shm_free(call_ctx->msg_shm);
+	optee_ocall_epilogue(call_ctx);
 }
 
 void optee_ocall_cancel_with_code(struct optee_call_ctx *call_ctx, u32 code)
@@ -220,8 +207,8 @@ int optee_ocall_process_request(struct tee_ioctl_invoke_arg *arg,
 		if (rc)
 			goto exit_set_ret;
 
-		optee_ocall_inc_memrefs_refcount(params, msg_num_params,
-						 call_ctx);
+		optee_ocall_process_memrefs(msg_param, msg_num_params, true);
+		call_ctx->rpc_must_release = true;
 
 		ocall->u.value.a = TEE_IOCTL_OCALL_CMD_INVOKE;
 
@@ -313,8 +300,8 @@ int optee_ocall_process_reply(struct tee_ioctl_invoke_arg *arg,
 		if (rc)
 			goto exit_set_ret;
 
-		optee_ocall_dec_memrefs_refcount(params, msg_num_params,
-						 call_ctx);
+		optee_ocall_process_memrefs(msg_param, msg_num_params, false);
+		call_ctx->rpc_must_release = false;
 
 		call_ctx->rpc_arg->params[0].u.value.b = arg->ret;
 		call_ctx->rpc_arg->params[0].u.value.c = arg->ret_origin;

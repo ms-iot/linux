@@ -195,7 +195,6 @@ struct tee_shm {
 	struct tee_device *teedev;
 	struct tee_context *ctx;
 	struct list_head link;
-	struct list_head ocall_link;
 	phys_addr_t paddr;
 	void *kaddr;
 	size_t size;

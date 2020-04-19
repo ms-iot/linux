@@ -112,14 +112,11 @@ typedef void (*optee_ocall_cancel_callback_t)(struct optee_call_ctx *call_ctx);
  * @msg_arg:		arguments used for calling into OP-TEE, namely the data
  *			behind 'msg_shm'
  * @msg_parg:		physical pointer underlying 'msg_shm'
+ * @rpc_must_release:	indicates that OCALL parameters have had their refcount
+ *			increased and must be decreased on cancellation
  * @rpc_shm:		shared memory object used for responding to RPCs
  * @rpc_arg:		arguments used for responding to RPCs, namely the data
  *			behind 'rpc_shm'
- * @list_shm:		list of shared memory objects used by an OCALL to which
- *			a reference is kept by the driver until the OCALL is
- *			complete or cancelled, effectively preventing the CA
- *			from releasing the SHM while an OCALL request or reply
- *			is being processed
  * @thread_id:		secure thread Id whence the OCALL originated and which
  *			must be resumed when replying to the OCALL
  * @waiter:		object used to wait until a secure thread becomes
@@ -139,10 +136,9 @@ struct optee_call_ctx {
 	struct optee_msg_arg *msg_arg;
 	phys_addr_t msg_parg;
 
+	bool rpc_must_release;
 	struct tee_shm *rpc_shm;
 	struct optee_msg_arg *rpc_arg;
-
-	struct list_head list_shm;
 
 	u32 thread_id;
 	struct optee_call_waiter waiter;
@@ -305,6 +301,8 @@ void optee_ocall_cancel_with_code(struct optee_call_ctx *call_ctx, u32 code);
 void optee_ocall_notify_session_close(struct optee_session *session);
 void optee_ocall_notify_context_release(struct tee_context *ctx);
 
+void optee_ocall_process_memrefs(struct optee_msg_param *params, u32 num_params,
+				 bool increment);
 int optee_ocall_process_request(struct tee_ioctl_invoke_arg *arg,
 				struct tee_param *params, u32 num_params,
 				struct tee_param *ocall,
