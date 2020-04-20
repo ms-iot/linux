@@ -197,7 +197,7 @@ int optee_rpc_process_shm_alloc(struct tee_shm *shm,
 {
 	phys_addr_t pa;
 	size_t sz;
-
+	size_t offs;
 	struct page **pages;
 	size_t page_num;
 	void *pages_list;
@@ -212,17 +212,23 @@ int optee_rpc_process_shm_alloc(struct tee_shm *shm,
 		if (!pages || !page_num)
 			return -EINVAL;
 
+		offs = tee_shm_get_page_offset(shm);
+		if (offs >= OPTEE_MSG_NONCONTIG_PAGE_SIZE)
+        		return -EINVAL;
+
 		pages_list = optee_allocate_pages_list(page_num);
 		if (!pages_list)
 			return -ENOMEM;
 
+		/*	
+		 * In the least bits of u.tmem.buf_ptr we store buffer offset	
+		 * from 4k page, as described in OP-TEE ABI.	
+		 */
+
 		msg_param->attr = OPTEE_MSG_ATTR_TYPE_TMEM_OUTPUT |
 				  OPTEE_MSG_ATTR_NONCONTIG;
-		msg_param->u.tmem.buf_ptr =
-			virt_to_phys(pages_list) |
-			(tee_shm_get_page_offset(shm) &
-			 (OPTEE_MSG_NONCONTIG_PAGE_SIZE - 1));
-		msg_param->u.tmem.size = tee_shm_get_size(shm);
+		msg_param->u.tmem.buf_ptr = virt_to_phys(pages_list) | offs;
+		msg_param->u.tmem.size = sz;
 		msg_param->u.tmem.shm_ref = (unsigned long)shm;
 		optee_fill_pages_list(pages_list, pages, page_num,
 				      tee_shm_get_page_offset(shm));
@@ -284,10 +290,12 @@ static void handle_rpc_func_cmd_shm_alloc(struct tee_context *ctx,
 		return;
 	}
 
-	rc = optee_rpc_process_shm_alloc(shm, &arg->params[0], &pages_list);
-	if (rc) {
-		arg->ret = rc == -ENOMEM
-			? TEEC_ERROR_OUT_OF_MEMORY : TEEC_ERROR_BAD_PARAMETERS;
+	rc = optee_rpc_process_shm_alloc(shm, arg->params, &pages_list);
+	if (rc == -ENOMEM) {
+		arg->ret = TEEC_ERROR_OUT_OF_MEMORY;
+		goto bad;
+	} else if (rc) {
+		arg->ret = TEEC_ERROR_BAD_PARAMETERS;
 		goto bad;
 	}
 
