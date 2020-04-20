@@ -170,7 +170,7 @@ tee_ioctl_shm_register(struct tee_context *ctx,
 		       struct tee_ioctl_shm_register_data __user *udata)
 {
 	long ret;
-	uint32_t flags = TEE_SHM_DMA_BUF | TEE_SHM_USER_MAPPED;
+	u32 flags = TEE_SHM_DMA_BUF | TEE_SHM_USER_MAPPED;
 	struct tee_ioctl_shm_register_data data;
 	struct tee_shm *shm;
 

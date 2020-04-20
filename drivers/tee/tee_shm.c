@@ -49,14 +49,11 @@ static void tee_shm_release(struct tee_shm *shm)
 		poolm->ops->free(poolm, shm);
 	} else if (shm->flags & TEE_SHM_REGISTER) {
 		size_t n;
-		if (!(shm->flags & TEE_SHM_OCALL)) {
-			rc = teedev->desc->ops->shm_unregister(shm->ctx, shm);
+		rc = teedev->desc->ops->shm_unregister(shm->ctx, shm);
 
-			if (rc)
-				dev_err(teedev->dev.parent,
-					"unregister shm %p failed: %d", shm,
-					rc);
-		}
+		if (rc)
+			dev_err(teedev->dev.parent,
+				"unregister shm %p failed: %d", shm, rc);
 
 		for (n = 0; n < shm->num_pages; n++)
 			put_page(shm->pages[n]);
@@ -249,7 +246,7 @@ struct tee_shm *tee_shm_register(struct tee_context *ctx, unsigned long addr,
 	int num_pages;
 	unsigned long start;
 
-	if (!(flags & req_flags))
+	if ((flags & req_flags) != req_flags)
 		return ERR_PTR(-ENOTSUPP);
 
 	if (!tee_device_get(teedev))
@@ -303,13 +300,11 @@ struct tee_shm *tee_shm_register(struct tee_context *ctx, unsigned long addr,
 		goto err;
 	}
 
-	if (!(flags & TEE_SHM_OCALL)) {
-		rc = teedev->desc->ops->shm_register(ctx, shm, shm->pages,
-						     shm->num_pages, start);
-		if (rc) {
-			ret = ERR_PTR(rc);
-			goto err;
-		}
+	rc = teedev->desc->ops->shm_register(ctx, shm, shm->pages,
+					     shm->num_pages, start);
+	if (rc) {
+		ret = ERR_PTR(rc);
+		goto err;
 	}
 
 	if (flags & TEE_SHM_DMA_BUF) {
