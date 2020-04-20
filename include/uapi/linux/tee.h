@@ -43,17 +43,17 @@
 #define TEE_IOC_BASE	0
 
 /* Flags relating to shared memory */
-#define TEE_IOCTL_SHM_MAPPED	BIT(0)/* memory mapped in normal world */
-#define TEE_IOCTL_SHM_DMA_BUF	BIT(1)/* dma-buf handle on shared memory */
-#define TEE_IOCTL_SHM_OCALL	BIT(2)/* memory used for an OCALL */
+#define TEE_IOCTL_SHM_MAPPED	0x1/* memory mapped in normal world */
+#define TEE_IOCTL_SHM_DMA_BUF	0x2/* dma-buf handle on shared memory */
+#define TEE_IOCTL_SHM_OCALL	0x4/* memory used for an OCALL */
 
 #define TEE_MAX_ARG_SIZE	1024
 
-#define TEE_GEN_CAP_GP		BIT(0)/* GlobalPlatform compliant TEE */
-#define TEE_GEN_CAP_PRIVILEGED	BIT(1)/* Privileged device (for supplicant) */
-#define TEE_GEN_CAP_REG_MEM	BIT(2)/* Supports registering shared memory */
-#define TEE_GEN_CAP_MEMREF_NULL	BIT(3)/* NULL MemRef support */
-#define TEE_GEN_CAP_OCALL	BIT(4)/* Supports calls from TA to CA */
+#define TEE_GEN_CAP_GP		(1 << 0)/* GlobalPlatform compliant TEE */
+#define TEE_GEN_CAP_PRIVILEGED	(1 << 1)/* Privileged device (for supplicant) */
+#define TEE_GEN_CAP_REG_MEM	(1 << 2)/* Supports registering shared memory */
+#define TEE_GEN_CAP_MEMREF_NULL	(1 << 3)/* NULL MemRef support */
+#define TEE_GEN_CAP_OCALL	(1 << 4)/* Supports calls from TA to CA */
 
 #define TEE_MEMREF_NULL		(__u64)(-1) /* NULL MemRef Buffer */
 
