@@ -108,7 +108,9 @@ struct tee_driver_ops {
 	int (*close_session)(struct tee_context *ctx, u32 session);
 	int (*invoke_func)(struct tee_context *ctx,
 			   struct tee_ioctl_invoke_arg *arg,
-			   struct tee_param *param);
+			   struct tee_param *normal_param,
+			   u32 num_normal_params,
+			   struct tee_param *ocall_param);
 	int (*cancel_req)(struct tee_context *ctx, u32 cancel_id, u32 session);
 	int (*supp_recv)(struct tee_context *ctx, u32 *func, u32 *num_params,
 			 struct tee_param *param);
@@ -613,23 +615,6 @@ static inline void tee_param_clear_ocall_safe(struct tee_param *ocall)
 {
 	if (ocall)
 		tee_param_clear_ocall(ocall);
-}
-
-static inline struct tee_param *
-tee_param_find_ocall(struct tee_param *params, u32 num_params)
-{
-	size_t n;
-
-	for (n = 0; n < num_params; n++) {
-		if (tee_param_is_ocall(params + n)) {
-			if (n == 0)
-				return params + n;
-			else
-				return ERR_PTR(-EINVAL);
-		}
-	}
-
-	return NULL;
 }
 
 static inline u64 tee_param_get_ocall_func(struct tee_param *param)

@@ -472,6 +472,33 @@ static int params_to_user(struct tee_ioctl_param __user *uparams,
 		: params_to_user_normal(uparams, num_params, params);
 }
 
+static inline int find_ocall_param(struct tee_param *params, u32 num_params,
+				   struct tee_param **normal_params,
+				   u32 *num_normal_params,
+				   struct tee_param **ocall_param)
+{
+	size_t n;
+
+	for (n = 0; n < num_params; n++) {
+		if (tee_param_is_ocall(params + n)) {
+			if (n == 0) {
+				*normal_params = params + 1;
+				*num_normal_params = num_params - 1;
+				*ocall_param = params;
+				return 0;
+			} else {
+				return -EINVAL;
+			}
+		}
+	}
+
+	*normal_params = params;
+	*num_normal_params = num_params;
+	*ocall_param = NULL;
+
+	return 0;
+}
+
 static int tee_ioctl_open_session(struct tee_context *ctx,
 				  struct tee_ioctl_buf_data __user *ubuf)
 {
@@ -554,7 +581,9 @@ static int tee_ioctl_invoke(struct tee_context *ctx,
 	struct tee_ioctl_invoke_arg arg;
 	struct tee_ioctl_param __user *uparams = NULL;
 	struct tee_param *params = NULL;
-	struct tee_param *ocall = NULL;
+	struct tee_param *ocall_param = NULL;
+	struct tee_param *normal_params = NULL;
+	u32 num_normal_params = 0;
 
 	if (!ctx->teedev->desc->ops->invoke_func)
 		return -EINVAL;
@@ -590,18 +619,19 @@ static int tee_ioctl_invoke(struct tee_context *ctx,
 		 * present, and NULL otherwise. Hence, 'ocall' can still be NULL
 		 * after this statement.
 		 */
-		ocall = tee_param_find_ocall(params, arg.num_params);
-		if (IS_ERR(ocall)) {
-			rc = PTR_ERR(ocall);
+		rc = find_ocall_param(params, arg.num_params, &normal_params,
+				      &num_normal_params, &ocall_param);
+		if (rc)
 			goto out;
-		}
 	}
 
-	rc = ctx->teedev->desc->ops->invoke_func(ctx, &arg, params);
+	rc = ctx->teedev->desc->ops->invoke_func(ctx, &arg, normal_params,
+						 num_normal_params,
+						 ocall_param);
 	if (rc)
 		goto out;
 
-	if ((tee_param_is_ocall_request_safe(ocall) &&
+	if ((tee_param_is_ocall_request_safe(ocall_param) &&
 	     put_user(arg.func, &uarg->func)) ||
 	    put_user(arg.ret, &uarg->ret) ||
 	    put_user(arg.ret_origin, &uarg->ret_origin)) {
@@ -622,7 +652,7 @@ out:
 		 * them. Otherwise, we leave the SHMs be; the TEE-specific
 		 * driver should have dealt with their ref counts already.
 		 */
-		if (!tee_param_is_ocall_request_safe(ocall)) {
+		if (!tee_param_is_ocall_request_safe(ocall_param)) {
 			for (n = 0; n < arg.num_params; n++)
 				if (tee_param_is_memref(params + n) &&
 				    params[n].u.memref.shm)
@@ -1235,9 +1265,22 @@ int tee_client_invoke_func(struct tee_context *ctx,
 			   struct tee_ioctl_invoke_arg *arg,
 			   struct tee_param *param)
 {
+	struct tee_param *ocall_param = NULL;
+	struct tee_param *normal_params = NULL;
+	u32 num_normal_params = 0;
+	int rc;
+
 	if (!ctx->teedev->desc->ops->invoke_func)
 		return -EINVAL;
-	return ctx->teedev->desc->ops->invoke_func(ctx, arg, param);
+
+	rc = find_ocall_param(param, arg->num_params, &normal_params,
+			      &num_normal_params, &ocall_param);
+	if (rc)
+		return rc;
+
+	return ctx->teedev->desc->ops->invoke_func(ctx, arg, normal_params,
+						   num_normal_params,
+						   ocall_param);
 }
 EXPORT_SYMBOL_GPL(tee_client_invoke_func);
 

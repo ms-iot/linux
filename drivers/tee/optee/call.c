@@ -286,17 +286,14 @@ int optee_close_session(struct tee_context *ctx, u32 session)
 }
 
 int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
-		      struct tee_param *param)
+		      struct tee_param *normal_param, u32 num_normal_params,
+		      struct tee_param *ocall_param)
 {
 	struct optee_context_data *ctxdata = ctx->data;
 	struct optee_call_ctx *call_ctx;
 	struct optee_session *sess;
-	struct tee_param *ocall;
 	u64 ocall_func;
 	int rc = 0;
-
-	u32 act_num_params;
-	struct tee_param *act_params;
 
 	/* Check that the session is valid */
 	mutex_lock(&ctxdata->mutex);
@@ -307,32 +304,23 @@ int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 	if (!sess)
 		return -EINVAL;
 
-	ocall = tee_param_find_ocall(param, arg->num_params);
-	if (IS_ERR(ocall)) {
-		rc = PTR_ERR(ocall);
-		goto exit;
-	}
-
-	if (ocall && !ctx->cap_ocall) {
+	if (ocall_param && !ctx->cap_ocall) {
 		rc = -ENOTSUPP;
 		goto exit;
 	}
 
-	act_num_params = arg->num_params - (ocall ? 1 : 0);
-	act_params = param + (ocall ? 1 : 0);
-
 	call_ctx = &sess->call_ctx;
-	ocall_func = ocall ? tee_param_get_ocall_func(ocall) : 0;
+	ocall_func = ocall_param ? tee_param_get_ocall_func(ocall_param) : 0;
 	if (ocall_func) {
 		/* The current call is a reply to an OCALL request */
-
 		if (!call_ctx->rpc_shm) {
 			rc = -EINVAL;
 			goto exit;
 		}
 
-		rc = optee_ocall_process_reply(arg, act_params, act_num_params,
-					       ocall, call_ctx);
+		rc = optee_ocall_process_reply(arg, normal_param,
+					       num_normal_params, ocall_param,
+					       call_ctx);
 		if (rc)
 			goto exit_with_cancel;
 	} else {
@@ -340,13 +328,12 @@ int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 		 * The current call is an invocation that may result in an OCALL
 		 * request.
 		 */
-
 		if (call_ctx->rpc_shm) {
 			rc = -EINVAL;
 			goto exit;
 		}
 
-		call_ctx->msg_shm = get_msg_arg(ctx, act_num_params,
+		call_ctx->msg_shm = get_msg_arg(ctx, num_normal_params,
 						&call_ctx->msg_arg,
 						&call_ctx->msg_parg);
 		if (IS_ERR(call_ctx->msg_shm)) {
@@ -362,7 +349,7 @@ int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 		call_ctx->msg_arg->cancel_id = arg->cancel_id;
 
 		rc = optee_to_msg_param(call_ctx->msg_arg->params,
-					act_num_params, act_params);
+					num_normal_params, normal_param);
 		if (rc)
 			goto exit_with_clear;
 
@@ -371,8 +358,8 @@ int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 
 	rc = optee_do_call_with_ctx(call_ctx);
 	if (rc == -EAGAIN) {
-		rc = optee_ocall_process_request(arg, act_params,
-						 act_num_params, ocall,
+		rc = optee_ocall_process_request(arg, normal_param,
+						 num_normal_params, ocall_param,
 						 call_ctx);
 		if (rc)
 			goto exit_with_cancel;
@@ -387,7 +374,7 @@ int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 			arg->ret_origin = TEEC_ORIGIN_COMMS;
 		}
 
-		if (optee_from_msg_param(act_params, act_num_params,
+		if (optee_from_msg_param(normal_param, num_normal_params,
 					 call_ctx->msg_arg->params)) {
 			arg->ret = TEEC_ERROR_COMMUNICATION;
 			arg->ret_origin = TEEC_ORIGIN_COMMS;
@@ -395,20 +382,20 @@ int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 
 		tee_shm_free(call_ctx->msg_shm);
 		memset(call_ctx, 0, sizeof(*call_ctx));
-		tee_param_clear_ocall_safe(ocall);
+		tee_param_clear_ocall_safe(ocall_param);
 	}
 
 	up(&sess->sem);
 	return rc;
 
 exit_with_cancel:
-	optee_from_msg_param(act_params, act_num_params,
+	optee_from_msg_param(normal_param, num_normal_params,
 			     call_ctx->msg_arg->params);
 	optee_ocall_cancel(call_ctx);
 exit_with_clear:
 	tee_shm_free(call_ctx->msg_shm);
 	memset(call_ctx, 0, sizeof(*call_ctx));
-	tee_param_clear_ocall_safe(ocall);
+	tee_param_clear_ocall_safe(ocall_param);
 exit:
 	up(&sess->sem);
 	return rc;

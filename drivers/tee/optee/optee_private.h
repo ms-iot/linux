@@ -239,7 +239,8 @@ int optee_close_session(struct tee_context *ctx, u32 session);
  */
 
 int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
-		      struct tee_param *param);
+		      struct tee_param *normal_param, u32 num_normal_params,
+		      struct tee_param *ocall_param);
 
 /*
  * Cancellations
