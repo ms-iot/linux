@@ -334,6 +334,7 @@ static void optee_release(struct tee_context *ctx)
 static const struct tee_driver_ops optee_ops = {
 	.get_version = optee_get_version,
 	.open = optee_open,
+	.pre_release = NULL,
 	.release = optee_release,
 	.open_session = optee_open_session,
 	.close_session = optee_close_session,
