@@ -513,3 +513,38 @@ void optee_handle_rpc(struct tee_context *ctx, struct optee_rpc_param *param,
 
 	param->a0 = OPTEE_SMC_CALL_RETURN_FROM_RPC;
 }
+
+bool optee_rpc_is_ocall(struct optee_rpc_param *param,
+			struct optee_call_ctx *call_ctx)
+{
+	u32 func;
+	u64 shm_type;
+
+	struct tee_shm *shm;
+	struct optee_msg_arg *arg;
+
+	func = OPTEE_SMC_RETURN_GET_RPC_FUNC(param->a0);
+	if (func != OPTEE_SMC_RPC_FUNC_CMD)
+		return false;
+
+	shm = reg_pair_to_ptr(param->a1, param->a2);
+	arg = tee_shm_get_va(shm, 0);
+
+	switch (arg->cmd) {
+	case OPTEE_MSG_RPC_CMD_SHM_ALLOC:
+	case OPTEE_MSG_RPC_CMD_SHM_FREE:
+		shm_type = arg->params[0].u.value.a;
+		if (shm_type != OPTEE_MSG_RPC_SHM_TYPE_CLIENT_APPL)
+			break;
+		fallthrough;
+	case OPTEE_MSG_RPC_CMD_OCALL:
+		call_ctx->rpc_shm = shm;
+		call_ctx->rpc_arg = arg;
+		call_ctx->thread_id = param->a3;
+		return true;
+	default:
+		break;
+	}
+
+	return false;
+}
